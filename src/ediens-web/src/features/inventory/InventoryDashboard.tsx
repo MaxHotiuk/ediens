@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { InventoryItem, StorageLocation } from '../../types/api';
-import { ediensStore } from '../store/mockStore';
+import { useState, useEffect, useCallback } from 'react';
+import { InventoryItem, StorageLocation, CreateInventoryItemRequest } from '../../types/api';
+import { ediensApi, DEFAULT_HOUSEHOLD_ID, EdiensApiError } from '../../api/client';
 import { InventoryItemCard } from './InventoryItemCard';
 import { AddInventoryModal } from './AddInventoryModal';
 import { ConflictResolutionModal } from '../../components/ui/ConflictResolutionModal';
@@ -15,7 +15,8 @@ import {
   Snowflake,
   ShieldAlert,
   AlertTriangle,
-  RotateCcw,
+  Loader2,
+  RefreshCw,
 } from 'lucide-react';
 
 export function InventoryDashboard({
@@ -24,6 +25,7 @@ export function InventoryDashboard({
   onShowToast: (title: string, desc: string, variant?: 'info' | 'success' | 'warning' | 'error') => void;
 }) {
   const [items, setItems] = useState<InventoryItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedLocation, setSelectedLocation] = useState<StorageLocation | 'All'>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -34,21 +36,29 @@ export function InventoryDashboard({
     serverQuantity: number;
     currentETag: string;
     attemptedQuantity: number;
+    modifiedBy?: string;
   } | null>(null);
 
-  const loadItems = () => {
-    const loc = selectedLocation === 'All' ? undefined : selectedLocation;
-    const all = ediensStore.getInventoryItems(loc);
-    setItems(all);
-  };
+  const loadItems = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const loc = selectedLocation === 'All' ? undefined : selectedLocation;
+      const data = await ediensApi.inventory.getItems({
+        householdId: DEFAULT_HOUSEHOLD_ID,
+        location: loc,
+      });
+      setItems(data);
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Не вдалося завантажити інвентар із сервера';
+      onShowToast('Помилка завантаження', msg, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedLocation, onShowToast]);
 
   useEffect(() => {
     loadItems();
-    const unsub = ediensStore.subscribe(() => {
-      loadItems();
-    });
-    return unsub;
-  }, [selectedLocation]);
+  }, [loadItems]);
 
   // Filtered by search
   const filteredItems = items.filter((item) =>
@@ -61,39 +71,96 @@ export function InventoryDashboard({
   const warningCount = items.filter((i) => i.freshnessStatus === 'EXPIRING_SOON').length;
   const freshCount = items.filter((i) => i.freshnessStatus === 'FRESH').length;
 
-  const handleConsume = (item: InventoryItem, delta: number) => {
-    const result = ediensStore.updateInventoryQuantity(item.id, delta, item.etag);
-    if (result.conflict) {
-      setConflictItem({
-        item,
-        serverQuantity: item.quantity,
-        currentETag: item.etag,
-        attemptedQuantity: Math.max(0, item.quantity + delta),
-      });
-    } else {
+  const handleConsume = async (item: InventoryItem, delta: number) => {
+    try {
+      const updated = await ediensApi.inventory.updateQuantity(
+        item.id,
+        { quantityDelta: delta, markOpened: false },
+        item.etag
+      );
+      setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
       onShowToast(
         'Продукт спожито',
-        `Списано ${Math.abs(delta)} ${item.unit} з «${item.productName}». Новий залишок: ${
-          Math.max(0, item.quantity + delta)
-        } ${item.unit}`,
+        `Списано ${Math.abs(delta)} ${item.unit} з «${item.productName}». Новий залишок: ${updated.quantity} ${updated.unit}`,
         'success'
       );
+    } catch (err: unknown) {
+      if (err instanceof EdiensApiError && err.status === 409) {
+        // Concurrency conflict! Extract RFC 9457 extensions
+        const ext = err.problem?.extensions as Record<string, unknown> | undefined;
+        const serverQty = typeof ext?.currentQuantity === 'number' ? ext.currentQuantity : item.quantity;
+        const currentETag = typeof ext?.currentETag === 'string' ? ext.currentETag : item.etag;
+        const modifiedBy = typeof ext?.lastModifiedBy === 'string' ? ext.lastModifiedBy : 'іншим учасником домогосподарства';
+
+        setConflictItem({
+          item,
+          serverQuantity: serverQty,
+          currentETag,
+          attemptedQuantity: Math.max(0, item.quantity + delta),
+          modifiedBy,
+        });
+        onShowToast(
+          'Конфлікт 409 (OCC)',
+          'Продукт було змінено паралельно. Будь ласка, оберіть дію в модальному вікні.',
+          'warning'
+        );
+      } else {
+        const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка оновлення кількості';
+        onShowToast('Помилка списання', msg, 'error');
+      }
     }
   };
 
-  const handleDelete = (item: InventoryItem) => {
-    ediensStore.deleteInventoryItem(item.id);
-    onShowToast('Партію видалено', `«${item.productName}» списано з інвентарю.`, 'info');
+  const handleDelete = async (item: InventoryItem) => {
+    try {
+      await ediensApi.inventory.deleteItem(item.id);
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+      onShowToast('Партію видалено', `«${item.productName}» списано з інвентарю.`, 'info');
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка видалення партії';
+      onShowToast('Помилка', msg, 'error');
+    }
   };
 
-  const handleSimulateConflict = (item: InventoryItem) => {
-    ediensStore.simulateExternalConflict(item.id);
-    setConflictItem({
-      item,
-      serverQuantity: Math.max(50, Math.round(item.quantity * 0.6)),
-      currentETag: `W/"${Math.floor(50000 + Math.random() * 40000)}"`,
-      attemptedQuantity: item.quantity,
-    });
+  const handleSimulateConflict = async (item: InventoryItem) => {
+    try {
+      // Send an intentional outdated ETag to invoke real backend 409 Conflict validation
+      await ediensApi.inventory.updateQuantity(
+        item.id,
+        { quantityDelta: -10, markOpened: false },
+        'W/"stale_xmin_token_99999"'
+      );
+    } catch (err: unknown) {
+      if (err instanceof EdiensApiError && err.status === 409) {
+        const ext = err.problem?.extensions as Record<string, unknown> | undefined;
+        const serverQty = typeof ext?.currentQuantity === 'number' ? ext.currentQuantity : item.quantity;
+        const currentETag = typeof ext?.currentETag === 'string' ? ext.currentETag : item.etag;
+        const modifiedBy = typeof ext?.lastModifiedBy === 'string' ? ext.lastModifiedBy : 'користувачем Anna';
+
+        setConflictItem({
+          item,
+          serverQuantity: serverQty,
+          currentETag,
+          attemptedQuantity: Math.max(0, item.quantity - 10),
+          modifiedBy,
+        });
+        onShowToast(
+          '409 Conflict отримано',
+          'Сервер повернув RFC 9457 CONCURRENT_MODIFICATION (ETag mismatch). Відкрито діалог розв\'язання конфлікту.',
+          'warning'
+        );
+      } else {
+        const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка тестування конфлікту';
+        onShowToast('Помилка', msg, 'error');
+      }
+    }
+  };
+
+  const handleAddItem = async (data: CreateInventoryItemRequest) => {
+    const newItem = await ediensApi.inventory.addItem(data);
+    setItems((prev) => [...prev, newItem]);
+    onShowToast('Партію додано', `«${data.productName}» успішно внесено до ${data.location}.`, 'success');
+    await loadItems();
   };
 
   return (
@@ -114,13 +181,11 @@ export function InventoryDashboard({
           <Button
             variant="outline"
             size="sm"
-            icon={<RotateCcw className="h-3.5 w-3.5" />}
-            onClick={() => {
-              ediensStore.resetAllToSeed();
-              onShowToast('Дані скинуто', 'Складські залишки повернуто до початкових seed-даних.', 'info');
-            }}
+            icon={isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            onClick={() => loadItems()}
+            disabled={isLoading}
           >
-            Скинути дані
+            Оновити дані
           </Button>
 
           <Button
@@ -211,8 +276,13 @@ export function InventoryDashboard({
         </span>
       </div>
 
-      {/* Items Grid */}
-      {filteredItems.length === 0 ? (
+      {/* Loading Indicator */}
+      {isLoading ? (
+        <div className="flex items-center justify-center p-12 text-zinc-400 text-sm gap-2">
+          <Loader2 className="h-5 w-5 animate-spin text-sky-400" />
+          <span>Завантаження актуальних запасів із бази даних...</span>
+        </div>
+      ) : filteredItems.length === 0 ? (
         <Card className="text-center p-8 border-dashed border-zinc-800">
           <CardContent className="space-y-3">
             <Refrigerator className="h-10 w-10 text-zinc-600 mx-auto" />
@@ -248,10 +318,7 @@ export function InventoryDashboard({
       <AddInventoryModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        onAdd={(data) => {
-          ediensStore.addInventoryItem(data);
-          onShowToast('Партію додано', `«${data.productName}» успішно внесено до ${data.location}.`, 'success');
-        }}
+        onAdd={handleAddItem}
       />
 
       {/* 409 Conflict Resolution Modal */}
@@ -264,8 +331,15 @@ export function InventoryDashboard({
           currentServerQuantity={conflictItem.serverQuantity}
           unit={conflictItem.item.unit}
           currentETag={conflictItem.currentETag}
-          modifiedBy="користувачем Anna"
+          modifiedBy={conflictItem.modifiedBy || 'користувачем Anna'}
           onAcceptServer={() => {
+            setItems((prev) =>
+              prev.map((i) =>
+                i.id === conflictItem.item.id
+                  ? { ...i, quantity: conflictItem.serverQuantity, etag: conflictItem.currentETag }
+                  : i
+              )
+            );
             onShowToast(
               'Конфлікт 409 вирішено',
               `Прийнято актуальний залишок сервера: ${conflictItem.serverQuantity} ${conflictItem.item.unit}.`,
@@ -273,18 +347,25 @@ export function InventoryDashboard({
             );
             setConflictItem(null);
           }}
-          onReapplyWithServerQuantity={(adjustedQty, newETag) => {
-            ediensStore.updateInventoryQuantity(
-              conflictItem.item.id,
-              adjustedQty - conflictItem.serverQuantity,
-              newETag
-            );
-            onShowToast(
-              'Зміни застосовано',
-              `Залишок успішно збережено з новим If-Match (${adjustedQty} ${conflictItem.item.unit}).`,
-              'success'
-            );
-            setConflictItem(null);
+          onReapplyWithServerQuantity={async (adjustedQty, newETag) => {
+            try {
+              const delta = adjustedQty - conflictItem.serverQuantity;
+              const updated = await ediensApi.inventory.updateQuantity(
+                conflictItem.item.id,
+                { quantityDelta: delta, markOpened: false },
+                newETag
+              );
+              setItems((prev) => prev.map((i) => (i.id === conflictItem.item.id ? updated : i)));
+              onShowToast(
+                'Зміни застосовано',
+                `Залишок успішно збережено з новим If-Match (${adjustedQty} ${conflictItem.item.unit}).`,
+                'success'
+              );
+              setConflictItem(null);
+            } catch (err: unknown) {
+              const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка повторного збереження';
+              onShowToast('Помилка', msg, 'error');
+            }
           }}
         />
       )}
