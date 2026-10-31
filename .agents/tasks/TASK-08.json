@@ -1,0 +1,37 @@
+{
+  "id": "TASK-08",
+  "title": "Docker Compose Multi-Container Stack, Prometheus Monitoring, and E2E Verification",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": null,
+  "branch": "chore/TASK-08-docker-monitoring-verification",
+  "dependencies": [
+    "TASK-06",
+    "TASK-07"
+  ],
+  "allowed_paths": [
+    "Dockerfile",
+    "compose.yaml",
+    "compose.monitoring.yaml",
+    "infra/**",
+    "docs/LOCAL_DEVELOPMENT.md",
+    "docs/VERIFICATION.md",
+    "scripts/verify.sh"
+  ],
+  "deliverables": [
+    "Dockerfile",
+    "compose.yaml",
+    "compose.monitoring.yaml",
+    "infra/**",
+    "docs/LOCAL_DEVELOPMENT.md",
+    "docs/VERIFICATION.md",
+    "scripts/verify.sh"
+  ],
+  "acceptance_criteria": [
+    "Production multi-stage Dockerfile and compose.yaml running .NET API, React (Nginx), PostgreSQL, and Redis.",
+    "Monitoring compose stack (compose.monitoring.yaml) with Prometheus, Grafana, and Alertmanager.",
+    "Detailed local development guide in docs/LOCAL_DEVELOPMENT.md.",
+    "End-to-end verification checklist and instructions in docs/VERIFICATION.md.",
+    "Complete scripts/verify.sh executing all build checks and integration test runners."
+  ]
+}

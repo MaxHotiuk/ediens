@@ -1,0 +1,8 @@
+# OpenAPI 3.1 Specification for ēdiens API
+# Scheduled for implementation in TASK-03
+openapi: 3.1.0
+info:
+  title: ēdiens API
+  version: 1.0.0
+  description: Specification skeleton. Full schema and endpoints are implemented in TASK-03.
+paths: {}

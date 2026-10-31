@@ -1,0 +1,28 @@
+{
+  "id": "TASK-07",
+  "title": "React Interactive Feature Views and Application Routing",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": null,
+  "branch": "feat/TASK-07-react-feature-views",
+  "dependencies": [
+    "TASK-05"
+  ],
+  "allowed_paths": [
+    "src/ediens-web/src/features/**",
+    "src/ediens-web/src/pages/**",
+    "src/ediens-web/src/App.tsx",
+    "src/ediens-web/src/main.tsx"
+  ],
+  "deliverables": [
+    "src/ediens-web/src/features/**",
+    "src/ediens-web/src/pages/**",
+    "src/ediens-web/src/App.tsx"
+  ],
+  "acceptance_criteria": [
+    "Interactive Fridge Inventory dashboard with FEFO badges and ETag conflict resolution modal on 409.",
+    "Daily Macro Tracker view with dynamic MacroProgressRing and meal logging forms.",
+    "Smart Recipe Recommendation view with 1-click Cook flow and missing-ingredient shopping prompts on 422.",
+    "Shared Household Shopping List view with offline-first checkbox state and sync."
+  ]
+}

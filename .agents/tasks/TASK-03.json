@@ -1,0 +1,25 @@
+{
+  "id": "TASK-03",
+  "title": "OpenAPI 3.1 Specification and RFC 9457 Error Handling Standards",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": null,
+  "branch": "docs/TASK-03-openapi-and-errors",
+  "dependencies": [
+    "TASK-01"
+  ],
+  "allowed_paths": [
+    "docs/Ediens_OpenAPI.yaml",
+    "docs/Ediens_SRS/05-error-handling.md"
+  ],
+  "deliverables": [
+    "docs/Ediens_OpenAPI.yaml",
+    "docs/Ediens_SRS/05-error-handling.md"
+  ],
+  "acceptance_criteria": [
+    "Valid OpenAPI 3.0/3.1 YAML specification covering minimum 10 endpoints in docs/Ediens_OpenAPI.yaml.",
+    "Full RFC 9457 ProblemDetails error schemas defined with custom errorCode and extensions.",
+    "Concrete request and response payload examples for HTTP 400, 403, 404, 409, 422, and 429 across the endpoints.",
+    "Comprehensive Client Reaction Rules matrix in 05-error-handling.md specifying how React frontend reacts to each error code."
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "TASK-05",
+  "title": "React 19 Frontend Foundation, Tailwind ElevenLabs UI Kit, and API Client",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": null,
+  "branch": "feat/TASK-05-react-ui-kit-foundation",
+  "dependencies": [
+    "TASK-03"
+  ],
+  "allowed_paths": [
+    "src/ediens-web/**"
+  ],
+  "deliverables": [
+    "src/ediens-web/package.json",
+    "src/ediens-web/vite.config.ts",
+    "src/ediens-web/tailwind.config.js",
+    "src/ediens-web/src/components/ui/**",
+    "src/ediens-web/src/api/client.ts",
+    "src/ediens-web/src/api/errorHandler.ts"
+  ],
+  "acceptance_criteria": [
+    "Vite + React 19 + TypeScript + Tailwind CSS initial project scaffold.",
+    "ElevenLabs-inspired monochrome UI component library: Button, Card, Badge, Input, Modal, MacroRing, ConflictResolutionModal, RateLimitBanner.",
+    "Type-safe HTTP API client with Axios or fetch wrapper.",
+    "Centralized error response interceptor implementing RFC 9457 reaction matrix (400, 403, 404, 409, 422, 429)."
+  ]
+}
