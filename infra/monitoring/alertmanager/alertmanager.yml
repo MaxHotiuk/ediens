@@ -1,0 +1,39 @@
+# ==============================================================================
+# Prometheus Alertmanager Configuration for ēdiens Platform
+# ==============================================================================
+
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ["alertname", "cluster", "service", "severity"]
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 2h
+  receiver: "default-receiver"
+  routes:
+    - match:
+        severity: critical
+      receiver: "critical-notifications"
+      repeat_interval: 30m
+    - match:
+        severity: warning
+      receiver: "warning-notifications"
+      repeat_interval: 1h
+
+receivers:
+  - name: "default-receiver"
+    webhook_configs: []
+
+  - name: "critical-notifications"
+    webhook_configs: []
+
+  - name: "warning-notifications"
+    webhook_configs: []
+
+inhibit_rules:
+  - source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal: ["alertname", "service"]

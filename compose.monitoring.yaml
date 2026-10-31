@@ -1,0 +1,120 @@
+# ==============================================================================
+# ēdiens — Observability & Monitoring Stack (compose.monitoring.yaml)
+# Services:
+#   - prometheus: Time-series metrics collection & rule evaluation
+#   - alertmanager: SLA and system incident alert dispatching
+#   - grafana: Real-time dashboards (Four Golden Signals & FEFO metrics)
+# ==============================================================================
+
+name: ediens-monitoring
+
+networks:
+  ediens-network:
+    name: ediens-network
+    driver: bridge
+
+volumes:
+  promdata:
+    name: ediens_promdata
+  alertmanagerdata:
+    name: ediens_alertmanagerdata
+  grafdata:
+    name: ediens_grafdata
+
+services:
+  # ----------------------------------------------------------------------------
+  # Prometheus Time-Series Database & Scraper
+  # ----------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: ediens-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./infra/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/monitoring/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - ediens-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 512M
+
+  # ----------------------------------------------------------------------------
+  # Prometheus Alertmanager
+  # ----------------------------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: ediens-alertmanager
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    volumes:
+      - ./infra/monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanagerdata:/alertmanager
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    networks:
+      - ediens-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9093/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+  # ----------------------------------------------------------------------------
+  # Grafana Dashboard Visualization
+  # ----------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: ediens-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: "/var/lib/grafana/dashboards/ediens_overview.json"
+    volumes:
+      - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafdata:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - ediens-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M

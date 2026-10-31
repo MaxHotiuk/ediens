@@ -1,0 +1,30 @@
+# Production Dockerfile for Ediens.Api (.NET 8 Web API)
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+COPY src/Ediens.Api/Ediens.Api.csproj src/Ediens.Api/
+RUN dotnet restore src/Ediens.Api/Ediens.Api.csproj
+
+COPY src/Ediens.Api/ src/Ediens.Api/
+WORKDIR /src/src/Ediens.Api
+RUN dotnet publish -c Release -o /app/publish --no-restore
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+EXPOSE 8080
+
+ENV ASPNETCORE_URLS=http://+:8080 \
+    ASPNETCORE_ENVIRONMENT=Production
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+USER $APP_UID
+COPY --from=build /app/publish .
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=10s \
+  CMD curl -f http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["dotnet", "Ediens.Api.dll"]

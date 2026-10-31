@@ -1,0 +1,12 @@
+# Grafana Dashboards Provisioning Provider
+apiVersion: 1
+
+providers:
+  - name: "ēdiens Dashboards"
+    orgId: 1
+    folder: "ēdiens Core"
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards
