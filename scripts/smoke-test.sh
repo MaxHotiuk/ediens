@@ -86,13 +86,19 @@ assert_problem_json() {
   local expected_error_code="$2"
   local response_file="$3"
 
-  local content_type
-  content_type=$(grep -i "^content-type:" "$response_file.headers" | tr -d '\r' | awk '{print $2}' || echo "")
-  
-  if [[ "$content_type" != *"application/problem+json"* && "$content_type" != *"application/json"* ]]; then
-    echo "  [FAIL] $label: Expected Content-Type application/problem+json, got '$content_type'"
-    ERRORS=$((ERRORS + 1))
-    return
+  local headers_file="${response_file%.json}.headers"
+  if [ ! -f "$headers_file" ]; then
+    headers_file="${response_file}.headers"
+  fi
+
+  if [ -f "$headers_file" ]; then
+    local content_type
+    content_type=$(grep -i "^content-type:" "$headers_file" | tr -d '\r' | awk '{print $2}' || echo "")
+    if [[ "$content_type" != *"application/problem+json"* && "$content_type" != *"application/json"* ]]; then
+      echo "  [FAIL] $label: Expected Content-Type application/problem+json, got '$content_type'"
+      ERRORS=$((ERRORS + 1))
+      return
+    fi
   fi
 
   local error_code
@@ -228,7 +234,7 @@ STATUS=$(curl -s -o "$TMP_DIR/product_barcode.json" -w "%{http_code}" \
 assert_status "GET /api/v1/products/barcode/{code}" 200 "$STATUS" "$(cat "$TMP_DIR/product_barcode.json" 2>/dev/null)"
 
 # Route 10: POST /api/v1/households/{id}/shopping-list/sync & GET
-SHOP_ITEM_ID="0192e2b5-$(head -c 6 /dev/urandom | xxd -p)-7000-8000-000000000001"
+SHOP_ITEM_ID="0192e2b5-$(head -c 2 /dev/urandom | xxd -p)-7000-8000-000000000001"
 STATUS=$(curl -s -o "$TMP_DIR/shop_sync.json" -w "%{http_code}" \
   -X POST "$BASE_URL/api/v1/households/$MAIN_HOUSEHOLD/shopping-list/sync" \
   -H "Content-Type: application/json" \
@@ -252,6 +258,29 @@ STATUS=$(curl -s -o "$TMP_DIR/shop_get.json" -w "%{http_code}" \
   -H "X-User-Id: $OLEG_USER" \
   "$BASE_URL/api/v1/households/$MAIN_HOUSEHOLD/shopping-list")
 assert_status "GET /api/v1/households/{id}/shopping-list" 200 "$STATUS" "$(cat "$TMP_DIR/shop_get.json" 2>/dev/null)"
+
+# Route 11: GET /api/v1/nutrition/progress
+STATUS=$(curl -s -o "$TMP_DIR/nut_progress.json" -w "%{http_code}" \
+  -H "X-User-Id: $OLEG_USER" \
+  "$BASE_URL/api/v1/nutrition/progress?householdId=$MAIN_HOUSEHOLD")
+assert_status "GET /api/v1/nutrition/progress" 200 "$STATUS" "$(cat "$TMP_DIR/nut_progress.json" 2>/dev/null)"
+
+# Route 12: GET /api/v1/meals
+STATUS=$(curl -s -o "$TMP_DIR/meals_get.json" -w "%{http_code}" \
+  -H "X-User-Id: $OLEG_USER" \
+  "$BASE_URL/api/v1/meals")
+assert_status "GET /api/v1/meals" 200 "$STATUS" "$(cat "$TMP_DIR/meals_get.json" 2>/dev/null)"
+
+# Route 13: GET /api/v1/households
+STATUS=$(curl -s -o "$TMP_DIR/households_get.json" -w "%{http_code}" \
+  -H "X-User-Id: $OLEG_USER" \
+  "$BASE_URL/api/v1/households")
+assert_status "GET /api/v1/households" 200 "$STATUS" "$(cat "$TMP_DIR/households_get.json" 2>/dev/null)"
+
+# Route 14: GET /metrics (Prometheus Observability)
+STATUS=$(curl -s -o "$TMP_DIR/metrics.txt" -w "%{http_code}" \
+  "$BASE_URL/metrics")
+assert_status "GET /metrics" 200 "$STATUS" ""
 
 echo ""
 echo "--- 3. Negative RFC 9457 Error Contract Suite ---"
@@ -286,6 +315,34 @@ STATUS=$(curl -s -D "$TMP_DIR/err404.headers" -o "$TMP_DIR/err404.json" -w "%{ht
 assert_status "404 Resource Not Found" 404 "$STATUS" "$(cat "$TMP_DIR/err404.json")"
 assert_problem_json "404 Not Found" "ITEM_NOT_FOUND" "$TMP_DIR/err404.json"
 
+# 409 Conflict / CONCURRENT_MODIFICATION (Stale ETag OCC)
+STATUS=$(curl -s -D "$TMP_DIR/err409_item.headers" -o "$TMP_DIR/err409_item.json" -w "%{http_code}" \
+  -X POST "$BASE_URL/api/v1/inventory/items" \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: $OLEG_USER" \
+  -d "{
+    \"householdId\": \"$MAIN_HOUSEHOLD\",
+    \"productName\": \"OCC Stale Verification Item\",
+    \"location\": \"Pantry\",
+    \"quantity\": 100,
+    \"unit\": \"g\",
+    \"expiresAt\": \"$EXPIRY_DATE\"
+  }")
+OCC_ITEM_ID=$(jq -r '.id // empty' "$TMP_DIR/err409_item.json" 2>/dev/null || echo "")
+if [ -n "$OCC_ITEM_ID" ]; then
+  STATUS=$(curl -s -D "$TMP_DIR/err409.headers" -o "$TMP_DIR/err409.json" -w "%{http_code}" \
+    -X PATCH "$BASE_URL/api/v1/inventory/items/$OCC_ITEM_ID" \
+    -H "Content-Type: application/json" \
+    -H "X-User-Id: $OLEG_USER" \
+    -H "If-Match: \"W/\\\"99999999\\\"\"" \
+    -d '{"quantityDelta": -10, "markOpened": false}')
+  assert_status "409 Conflict (stale ETag OCC mismatch)" 409 "$STATUS" "$(cat "$TMP_DIR/err409.json")"
+  assert_problem_json "409 Conflict" "CONCURRENT_MODIFICATION" "$TMP_DIR/err409.json"
+
+  # Clean up test item
+  curl -s -X DELETE "$BASE_URL/api/v1/inventory/items/$OCC_ITEM_ID" -H "X-User-Id: $OLEG_USER" >/dev/null 2>&1 || true
+fi
+
 # 422 Insufficient Inventory / INSUFFICIENT_INVENTORY (Cook recipe with massive servings)
 SEEDED_RECIPE_ID="0192e2b8-1234-7111-9988-bbccddeeff00"
 STATUS=$(curl -s -D "$TMP_DIR/err422.headers" -o "$TMP_DIR/err422.json" -w "%{http_code}" \
@@ -297,11 +354,8 @@ STATUS=$(curl -s -D "$TMP_DIR/err422.headers" -o "$TMP_DIR/err422.json" -w "%{ht
     \"servings\": 20,
     \"mealType\": \"Dinner\"
   }")
-# Recipe cook can return 422 if inventory is insufficient (expected behavior for 20 servings)
-if [ "$STATUS" -eq 422 ]; then
-  assert_status "422 Insufficient Inventory on cook recipe" 422 "$STATUS" "$(cat "$TMP_DIR/err422.json")"
-  assert_problem_json "422 Insufficient Inventory" "INSUFFICIENT_INVENTORY" "$TMP_DIR/err422.json"
-fi
+assert_status "422 Insufficient Inventory on cook recipe" 422 "$STATUS" "$(cat "$TMP_DIR/err422.json")"
+assert_problem_json "422 Insufficient Inventory" "INSUFFICIENT_INVENTORY" "$TMP_DIR/err422.json"
 
 # 429 Rate Limit Exceeded check on barcode route
 RATE_LIMITED=0

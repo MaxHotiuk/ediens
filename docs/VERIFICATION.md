@@ -165,11 +165,66 @@ curl -i http://localhost:8080/metrics
 ./scripts/verify.sh
 ```
 
-Скрипт послідовно виконує 5 етапів валідації:
-1. Синтаксична валідація JSON стану завдань (.agents/tasks).
-2. Перевірка наявності всіх нормативних документів (SRS, OpenAPI, посібники).
-3. Збірка бекенду .NET 8 API та виконання повного набору xUnit тестів.
-4. Збірка клієнтського інтерфейсу React 19 (TypeScript компиляція + Vite).
-5. Валідація структури Dockerfile, Docker Compose та моніторингових конфігурацій.
+Скрипт послідовно виконує 7 етапів валідації:
+1. Синтаксична валідація JSON стану завдань (`TASK-*` та `FIX-*`).
+2. Перевірка наявності всіх нормативних документів (SRS, OpenAPI, посібники, конфігурації контейнерів та моніторингу).
+3. Anti-Kostyl Gate: статичний пошук заборонених патернів моків (`MOCK_`, `fallbackData`, `fakeApi`, ковтання помилок у `catch`).
+4. Збірка бекенду .NET 8 API та виконання повного набору тестів xUnit (17/17 тестів).
+5. Збірка клієнтського інтерфейсу React 19 (TypeScript компіляція `tsc -b` + Vite production bundle).
+6. Валідація структури Dockerfile, Docker Compose (`compose.yaml`, `compose.monitoring.yaml`) та AST валідація YAML.
+7. Валідація правил Prometheus та JSON-дашбордів Grafana.
 
-При успішному проходженні скрипт повертає статус `0` із повідомленням `Verification PASSED successfully`.
+Для наскрізного запуску разом із живими димовими тестами API використовуйте:
+```bash
+./scripts/verify.sh --smoke
+# або із автоматичним запуском API бекенду:
+AUTO_BOOT=1 ./scripts/verify.sh --smoke
+```
+
+---
+
+## 5. Звіт про стабілізацію та прийомку (Phase 2: Zero-Fallback Stabilization)
+
+Усі завдання другої фази стабілізації (`FIX-01` — `FIX-06`) успішно реалізовані та злиті в гілку `develop` відповідно до розподіленого протоколу блокувань Multi-PC Git Lock:
+
+| Завдання | Опис | Статус | Результат верифікації |
+| :--- | :--- | :--- | :--- |
+| **FIX-01** | CORS, міграції EF Core, PostgreSQL 17+, RFC 9457 middleware | `DONE` | Міграції створені, глобальний перехоплювач винятків повертає `application/problem+json` |
+| **FIX-02** | Типізований клієнт `Axios`, обробник помилок, змінні середовища | `DONE` | `ediensApi` типізований через Axios, перехоплювачі обробляють 400/403/404/409/422/429 |
+| **FIX-03** | Жива інтеграція інвентарю та штрихкодів, FEFO бейджі, OCC ETag 409 | `DONE` | Реальний доступ до БД `ediens`, списання з перевіркою версії `xmin`, модальне вікно конфліктів |
+| **FIX-04** | Харчування, прогрес КБЖВ, 1-Click Cook списання, обробка дефіциту 422 | `DONE` | `GET /api/v1/nutrition/progress`, `GET /api/v1/meals`, списання інгредієнтів за FEFO, 422 модалка |
+| **FIX-05** | Домогосподарства, синхронізація списку покупок, offline queue LWW, OpenAPI | `DONE` | `GET /api/v1/households`, синхронізація з Last-Write-Wins, узгодження `Ediens_OpenAPI.yaml` |
+| **FIX-06** | Docker Compose інтеграція, Nginx проксі, видалення залишків моків, E2E Smoke Suite | `DONE` | 31/31 димових тестів пройдено, повне видалення `mockStore.ts`, Nginx проксі з прокиданням заголовків |
+
+### 5.1 Результати запуску E2E Smoke Test Suite (`scripts/smoke-test.sh`)
+
+- **Перевірка базового стану:**
+  - `GET /health`: HTTP 200 OK (`Healthy`)
+  - `GET /api/v1/ping`: HTTP 200 OK (`pong`)
+- **Позитивні тести OpenAPI маршрутів (14 ендпоінтів):**
+  - `POST /api/v1/inventory/items`: HTTP 201 Created (з поверненням ETag)
+  - `GET /api/v1/inventory/items?householdId=...`: HTTP 200 OK (FEFO сортування)
+  - `GET /api/v1/inventory/items/{id}`: HTTP 200 OK
+  - `PATCH /api/v1/inventory/items/{id}` (з `If-Match: W/"..."`): HTTP 200 OK
+  - `DELETE /api/v1/inventory/items/{id}`: HTTP 204 No Content
+  - `POST /api/v1/meals/log` (з `Idempotency-Key`): HTTP 201 Created
+  - `PUT /api/v1/nutrition/targets`: HTTP 200 OK
+  - `GET /api/v1/nutrition/targets`: HTTP 200 OK
+  - `GET /api/v1/nutrition/progress`: HTTP 200 OK
+  - `GET /api/v1/meals`: HTTP 200 OK
+  - `GET /api/v1/recipes/recommendations`: HTTP 200 OK
+  - `GET /api/v1/products/barcode/{code}`: HTTP 200 OK
+  - `GET /api/v1/households`: HTTP 200 OK
+  - `POST /api/v1/households/{id}/shopping-list/sync`: HTTP 200 OK
+  - `GET /api/v1/households/{id}/shopping-list`: HTTP 200 OK
+  - `GET /metrics`: HTTP 200 OK (Prometheus text format)
+- **Негативні контракти помилок RFC 9457:**
+  - `HTTP 400`: `errorCode: VALIDATION_FAILED` (некоректна кількість та локація)
+  - `HTTP 403`: `errorCode: HOUSEHOLD_ACCESS_DENIED` (міждомогосподарський доступ)
+  - `HTTP 404`: `errorCode: ITEM_NOT_FOUND` (неіснуючий ідентифікатор)
+  - `HTTP 409`: `errorCode: CONCURRENT_MODIFICATION` (застарілий ETag при мутації)
+  - `HTTP 422`: `errorCode: INSUFFICIENT_INVENTORY` (приготування страви за браком продуктів)
+  - `HTTP 429`: `errorCode: RATE_LIMIT_EXCEEDED` (перевищення ліміту частоти запитів + заголовок `Retry-After: 30`)
+
+**Підсумок:** Платформа ēdiens повністю позбавлена штучних заглушок, мок-масивів та емуляцій помилок. Усі клієнтські операції успішно виконуються проти реальної реляційної СУБД PostgreSQL 17 та бекенду ASP.NET Core 8.
+

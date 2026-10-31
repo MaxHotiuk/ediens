@@ -20,8 +20,6 @@ import {
 } from 'lucide-react';
 import { ErrorListeners } from './api/errorHandler';
 import { generateUuid } from './api/client';
-import { ediensStore } from './features/store/mockStore';
-
 // Page Views
 import { InventoryPage } from './pages/InventoryPage';
 import { MacroTrackerPage } from './pages/MacroTrackerPage';
@@ -58,9 +56,9 @@ export function App() {
   // Spec Info Modal
   const [isSpecModalOpen, setIsSpecModalOpen] = useState(false);
 
-  // Connectivity state from store
-  const [isOffline, setIsOffline] = useState(ediensStore.getOfflineMode());
-  const [offlineChanges, setOfflineChanges] = useState(ediensStore.getOfflineChangesCount());
+  // Connectivity state
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [offlineChanges] = useState(0);
 
   const addToast = (toast: Omit<ToastMessage, 'id'>) => {
     const id = generateUuid();
@@ -88,13 +86,16 @@ export function App() {
     window.location.hash = tab;
   };
 
-  // Subscribe to central store updates
+  // Connectivity event listeners
   useEffect(() => {
-    const unsub = ediensStore.subscribe(() => {
-      setIsOffline(ediensStore.getOfflineMode());
-      setOfflineChanges(ediensStore.getOfflineChangesCount());
-    });
-    return unsub;
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   // Subscribe to errorBus RFC 9457 reactions

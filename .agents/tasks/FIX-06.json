@@ -1,9 +1,9 @@
 {
   "id": "FIX-06",
   "title": "Docker Compose Full-Stack Integration & E2E Smoke Verification",
-  "status": "IN_PROGRESS",
+  "status": "DONE",
   "assigned_to": "Maxs-MacBook-Air",
-  "updated_at": "2026-10-31T10:20:04Z",
+  "updated_at": "2026-10-31T10:28:45Z",
   "branch": "fix/FIX-06-docker-e2e-verification",
   "dependencies": [
     "FIX-03",
@@ -15,7 +15,9 @@
     "Dockerfile*",
     "infra/**",
     "scripts/**",
+    "src/Ediens.Api/**",
     "src/Ediens.Tests/**",
+    "src/ediens-web/**",
     "docs/VERIFICATION.md"
   ],
   "deliverables": [
