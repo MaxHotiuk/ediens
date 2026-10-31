@@ -1,9 +1,9 @@
 {
   "id": "FIX-05",
   "title": "End-to-End Fix: Households & Shopping List Sync + OpenAPI Alignment",
-  "status": "IN_PROGRESS",
+  "status": "DONE",
   "assigned_to": "Maxs-MacBook-Air",
-  "updated_at": "2026-10-31T10:14:21Z",
+  "updated_at": "2026-10-31T10:19:23Z",
   "branch": "fix/FIX-05-e2e-households-and-openapi-sync",
   "dependencies": [
     "FIX-01",
