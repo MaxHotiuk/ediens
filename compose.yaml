@@ -1,0 +1,143 @@
+# ==============================================================================
+# ēdiens — Primary Application Multi-Container Stack (compose.yaml)
+# Services:
+#   - postgres: PostgreSQL 17 database with persistent volume
+#   - redis: Redis 7 distributed cache and lock coordinator
+#   - ediens-api: ASP.NET Core 8 Web API backend
+#   - ediens-web: Nginx reverse proxy serving React 19 SPA
+# ==============================================================================
+
+name: ediens
+
+networks:
+  ediens-network:
+    name: ediens-network
+    driver: bridge
+
+volumes:
+  pgdata:
+    name: ediens_pgdata
+  redisdata:
+    name: ediens_redisdata
+
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL 17 Database
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    container_name: ediens-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ediens}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ediens_secure_password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - ediens-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ediens}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
+
+  # ----------------------------------------------------------------------------
+  # Redis 7 Distributed Cache & Concurrency Lock
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: ediens-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - ediens-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ----------------------------------------------------------------------------
+  # ēdiens Web API (ASP.NET Core 8 Minimal API)
+  # ----------------------------------------------------------------------------
+  ediens-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    container_name: ediens-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-ediens};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-ediens_secure_password}"
+      ConnectionStrings__RedisConnection: "redis:6379"
+      JwtSettings__Secret: "${JWT_SECRET:-EdiensSecretKeyLongEnoughForHMACSHA256Security2026!}"
+    ports:
+      - "${API_PORT:-8080}:8080"
+    networks:
+      - ediens-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1024M
+
+  # ----------------------------------------------------------------------------
+  # ēdiens Web (React 19 SPA + Nginx Reverse Proxy)
+  # ----------------------------------------------------------------------------
+  ediens-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    container_name: ediens-web
+    restart: unless-stopped
+    depends_on:
+      ediens-api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-80}:80"
+    networks:
+      - ediens-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
