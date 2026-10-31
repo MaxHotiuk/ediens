@@ -12,8 +12,8 @@ echo "=========================================================="
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-API_PORT="${API_PORT:-8080}"
-HOST_CANDIDATES=("http://localhost:8080" "http://localhost:5158" "http://127.0.0.1:8080" "http://127.0.0.1:5158")
+API_PORT="${API_PORT:-8089}"
+HOST_CANDIDATES=("http://localhost:8089" "http://localhost:8080" "http://localhost:5158" "http://127.0.0.1:8089" "http://127.0.0.1:8080" "http://127.0.0.1:5158")
 BASE_URL="${API_URL:-}"
 
 # Auto-detect running instance if API_URL not explicitly provided
