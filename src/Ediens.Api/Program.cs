@@ -1,4 +1,5 @@
 using Ediens.Api.Data;
+using Ediens.Api.Features;
 using Ediens.Api.Middleware;
 using Microsoft.EntityFrameworkCore;
 
@@ -82,6 +83,24 @@ app.MapGet("/api/v1/ping", () => Results.Ok(new
 .WithName("Ping")
 .WithTags("System")
 .WithOpenApi();
+
+// 7. Реєстрація всіх вертикальних слайсів та REST-ендпоінтів платформи ēdiens
+app.MapEdiensEndpoints();
+
+// Автоматичний демо-сідінг при наявності зв'язку з БД
+try
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<EdiensDbContext>();
+    if (db.Database.CanConnect())
+    {
+        await Ediens.Api.Features.Common.DatabaseSeeder.SeedAsync(db);
+    }
+}
+catch
+{
+    // Ігноруємо якщо база даних ще не ініціалізована або запускається в ізольованому тестовому середовищі
+}
 
 app.Run();
 
