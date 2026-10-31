@@ -2,33 +2,30 @@ import React, { useState } from 'react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input, FormField, FormLabel, FormError } from '../../components/ui/Input';
-import { StorageLocation, MeasurementUnit } from '../../types/api';
-import { Plus, Refrigerator, Archive, Snowflake, Sparkles } from 'lucide-react';
+import { StorageLocation, MeasurementUnit, CreateInventoryItemRequest } from '../../types/api';
+import { ediensApi, DEFAULT_HOUSEHOLD_ID, EdiensApiError } from '../../api/client';
+import { Plus, Refrigerator, Archive, Snowflake, Sparkles, ScanBarcode, Search, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export interface AddInventoryModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (item: {
-    productName: string;
-    location: StorageLocation;
-    quantity: number;
-    unit: MeasurementUnit;
-    expiresAt: string;
-    householdId: string;
-  }) => void;
+  onAdd: (item: CreateInventoryItemRequest) => Promise<void> | void;
 }
 
-const PRESET_PRODUCTS = [
-  { name: "Молоко фермерське 2.5%", location: 'Fridge' as StorageLocation, unit: 'ml' as MeasurementUnit, defaultDays: 4, defaultQty: 900 },
-  { name: "Яйця курячі C0", location: 'Fridge' as StorageLocation, unit: 'pcs' as MeasurementUnit, defaultDays: 14, defaultQty: 10 },
-  { name: "Куряче філе охолоджене", location: 'Fridge' as StorageLocation, unit: 'g' as MeasurementUnit, defaultDays: 2, defaultQty: 600 },
-  { name: "Сир кисломолочний 5%", location: 'Fridge' as StorageLocation, unit: 'g' as MeasurementUnit, defaultDays: 3, defaultQty: 350 },
-  { name: "Лосось слабосолений", location: 'Fridge' as StorageLocation, unit: 'g' as MeasurementUnit, defaultDays: 5, defaultQty: 200 },
-  { name: "Заморожені ягоди лохини", location: 'Freezer' as StorageLocation, unit: 'g' as MeasurementUnit, defaultDays: 90, defaultQty: 400 },
-  { name: "Гречана крупа ядриця", location: 'Pantry' as StorageLocation, unit: 'g' as MeasurementUnit, defaultDays: 120, defaultQty: 1000 },
+const BARCODE_PRESETS = [
+  { label: 'Молоко 2.5%', barcode: '4820000112233' },
+  { label: 'Куряче філе', barcode: '4820000112244' },
+  { label: 'Вівсянка', barcode: '4820000112255' },
+  { label: 'Шпинат', barcode: '4820000112277' },
+  { label: 'Гречка', barcode: '4820000112288' },
 ];
 
 export function AddInventoryModal({ isOpen, onClose, onAdd }: AddInventoryModalProps) {
+  const [barcode, setBarcode] = useState('');
+  const [isSearchingBarcode, setIsSearchingBarcode] = useState(false);
+  const [barcodeMessage, setBarcodeMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  const [productId, setProductId] = useState<string | null>(null);
   const [productName, setProductName] = useState('');
   const [location, setLocation] = useState<StorageLocation>('Fridge');
   const [quantity, setQuantity] = useState<string>('500');
@@ -36,18 +33,62 @@ export function AddInventoryModal({ isOpen, onClose, onAdd }: AddInventoryModalP
   const [expiryDays, setExpiryDays] = useState<number>(3);
   const [errorName, setErrorName] = useState<string | null>(null);
   const [errorQuantity, setErrorQuantity] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const applyPreset = (preset: typeof PRESET_PRODUCTS[0]) => {
-    setProductName(preset.name);
-    setLocation(preset.location);
-    setUnit(preset.unit);
-    setExpiryDays(preset.defaultDays);
-    setQuantity(String(preset.defaultQty));
-    setErrorName(null);
-    setErrorQuantity(null);
+  const handleBarcodeLookup = async (codeToLookup?: string) => {
+    const code = (codeToLookup || barcode).trim();
+    if (!code) return;
+
+    setIsSearchingBarcode(true);
+    setBarcodeMessage(null);
+
+    try {
+      const product = await ediensApi.products.getByBarcode(code);
+      setProductName(product.name);
+      setProductId(product.id);
+      setBarcode(code);
+
+      // Auto-select location & unit based on product characteristics
+      const lowerName = product.name.toLowerCase();
+      if (lowerName.includes('молоко') || lowerName.includes('напій') || lowerName.includes('сік')) {
+        setUnit('ml');
+        setLocation('Fridge');
+        setExpiryDays(4);
+      } else if (lowerName.includes('крупа') || lowerName.includes('пластівці') || lowerName.includes('борошно')) {
+        setUnit('g');
+        setLocation('Pantry');
+        setExpiryDays(90);
+      } else if (lowerName.includes('філе') || lowerName.includes('м\'ясо') || lowerName.includes('риба')) {
+        setUnit('g');
+        setLocation('Fridge');
+        setExpiryDays(2);
+      } else if (lowerName.includes('яйця')) {
+        setUnit('pcs');
+        setLocation('Fridge');
+        setExpiryDays(14);
+      } else {
+        setUnit('g');
+        setLocation('Fridge');
+        setExpiryDays(5);
+      }
+
+      setBarcodeMessage({
+        text: `✓ Знайдено в каталозі: «${product.name}» (${product.brand || 'Локальна база'}) • ${product.caloriesPer100g} ккал/100г`,
+        isError: false,
+      });
+      setErrorName(null);
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Штрих-код не знайдено в каталозі';
+      setBarcodeMessage({
+        text: msg,
+        isError: true,
+      });
+    } finally {
+      setIsSearchingBarcode(false);
+    }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     let hasError = false;
 
@@ -70,20 +111,32 @@ export function AddInventoryModal({ isOpen, onClose, onAdd }: AddInventoryModalP
 
     const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString();
 
-    onAdd({
-      householdId: 'hh-podil-01',
-      productName: productName.trim(),
-      location,
-      quantity: qty,
-      unit,
-      expiresAt,
-    });
+    setIsSubmitting(true);
+    try {
+      await onAdd({
+        householdId: DEFAULT_HOUSEHOLD_ID,
+        productId: productId || null,
+        productName: productName.trim(),
+        location,
+        quantity: qty,
+        unit,
+        expiresAt,
+      });
 
-    // Reset form
-    setProductName('');
-    setQuantity('500');
-    setExpiryDays(3);
-    onClose();
+      // Reset form
+      setBarcode('');
+      setBarcodeMessage(null);
+      setProductId(null);
+      setProductName('');
+      setQuantity('500');
+      setExpiryDays(3);
+      onClose();
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка додавання партії';
+      setErrorName(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -100,24 +153,83 @@ export function AddInventoryModal({ isOpen, onClose, onAdd }: AddInventoryModalP
       description="Внесіть партію продуктів з терміном придатності для автоматичного обліку FEFO."
     >
       <form onSubmit={handleSubmit} className="space-y-4 pt-1">
-        {/* Quick Presets */}
-        <div>
-          <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-            <Sparkles className="h-3 w-3 text-amber-400" />
-            <span>Швидкі шаблони продуктів:</span>
+        {/* Barcode Search & Fast Autofill */}
+        <div className="p-3 rounded-lg bg-zinc-900/60 border border-zinc-800 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-zinc-300 flex items-center gap-1.5">
+              <ScanBarcode className="h-4 w-4 text-sky-400" />
+              <span>Сканування штрих-коду EAN-13:</span>
+            </span>
+            <span className="text-[10px] font-mono text-zinc-500">OpenFoodFacts & Local DB</span>
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {PRESET_PRODUCTS.slice(0, 4).map((p) => (
-              <button
-                key={p.name}
-                type="button"
-                onClick={() => applyPreset(p)}
-                className="text-xs px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors"
-              >
-                {p.name.split(' ')[0]} {p.name.split(' ')[1] || ''}
-              </button>
-            ))}
+
+          <div className="flex gap-2">
+            <Input
+              id="barcode-input"
+              placeholder="Введіть 8–13 цифр (наприклад, 4820000112233)..."
+              value={barcode}
+              onChange={(e) => {
+                setBarcode(e.target.value);
+                if (barcodeMessage) setBarcodeMessage(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleBarcodeLookup();
+                }
+              }}
+              prefixIcon={<ScanBarcode className="h-4 w-4 text-zinc-500" />}
+              className="text-xs font-mono"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              icon={<Search className="h-3.5 w-3.5" />}
+              onClick={() => handleBarcodeLookup()}
+              disabled={isSearchingBarcode || !barcode.trim()}
+            >
+              {isSearchingBarcode ? 'Пошук...' : 'Знайти'}
+            </Button>
           </div>
+
+          {/* Quick presets for seeded products */}
+          <div className="flex items-center gap-1.5 pt-1">
+            <span className="text-[10px] text-zinc-500 flex items-center gap-1">
+              <Sparkles className="h-2.5 w-2.5 text-amber-400" />
+              <span>Швидкий EAN:</span>
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {BARCODE_PRESETS.map((p) => (
+                <button
+                  key={p.barcode}
+                  type="button"
+                  onClick={() => handleBarcodeLookup(p.barcode)}
+                  className="text-[11px] font-mono px-2 py-0.5 rounded bg-zinc-950 border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700 transition-colors"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Barcode Lookup Result Message */}
+          {barcodeMessage && (
+            <div
+              className={`text-xs px-2.5 py-1.5 rounded border flex items-center gap-1.5 animate-fade-in ${
+                barcodeMessage.isError
+                  ? 'bg-rose-950/40 border-rose-900/60 text-rose-300'
+                  : 'bg-emerald-950/40 border-emerald-900/60 text-emerald-300'
+              }`}
+            >
+              {barcodeMessage.isError ? (
+                <AlertCircle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+              )}
+              <span>{barcodeMessage.text}</span>
+            </div>
+          )}
         </div>
 
         {/* Product Name */}
@@ -227,6 +339,7 @@ export function AddInventoryModal({ isOpen, onClose, onAdd }: AddInventoryModalP
               { label: '+7 днів', days: 7 },
               { label: '+14 днів', days: 14 },
               { label: '+30 днів', days: 30 },
+              { label: '+90 днів', days: 90 },
             ].map((p) => (
               <button
                 key={p.days}
@@ -249,6 +362,7 @@ export function AddInventoryModal({ isOpen, onClose, onAdd }: AddInventoryModalP
                 weekday: 'short',
                 day: 'numeric',
                 month: 'long',
+                year: 'numeric',
               })}
             </span>
           </div>
@@ -256,11 +370,11 @@ export function AddInventoryModal({ isOpen, onClose, onAdd }: AddInventoryModalP
 
         {/* Modal Footer */}
         <div className="flex items-center justify-end gap-2 pt-4 border-t border-zinc-900">
-          <Button variant="ghost" size="sm" type="button" onClick={onClose}>
+          <Button variant="ghost" size="sm" type="button" onClick={onClose} disabled={isSubmitting}>
             Скасувати
           </Button>
-          <Button variant="default" size="sm" type="submit" icon={<Plus className="h-4 w-4" />}>
-            Додати в інвентар
+          <Button variant="default" size="sm" type="submit" icon={<Plus className="h-4 w-4" />} disabled={isSubmitting}>
+            {isSubmitting ? 'Збереження...' : 'Додати в інвентар'}
           </Button>
         </div>
       </form>
