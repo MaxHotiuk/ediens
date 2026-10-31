@@ -1,9 +1,9 @@
 {
   "id": "QOL-01",
   "title": "Shopping List to Inventory Transfer Workflow & Bought Product Synchronization",
-  "status": "TODO",
-  "assigned_to": null,
-  "updated_at": "2026-10-31T21:30:00Z",
+  "status": "IN_PROGRESS",
+  "assigned_to": "Maxs-MacBook-Air",
+  "updated_at": "2026-10-31T21:43:08Z",
   "branch": "feat/QOL-01-shopping-to-inventory-transfer",
   "dependencies": [
     "FIX-07"
