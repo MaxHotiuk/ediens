@@ -239,7 +239,7 @@ public static class DatabaseSeeder
             await db.SaveChangesAsync();
         }
 
-        // 6. Цільові норми КБЖВ
+    // 6. Цільові норми КБЖВ
         if (!await db.NutritionTargets.AnyAsync(t => t.UserId == OlegUserId))
         {
             db.NutritionTargets.Add(new NutritionTarget
@@ -253,6 +253,144 @@ public static class DatabaseSeeder
                 EffectiveFrom = DateOnly.FromDateTime(DateTime.UtcNow),
                 CreatedAt = DateTime.UtcNow
             });
+            await db.SaveChangesAsync();
+        }
+
+        // 7. Складські запаси (Inventory Items) - FEFO облік з різними строками придатності
+        if (!await db.InventoryItems.AnyAsync(i => i.HouseholdId == MainHouseholdId))
+        {
+            db.InventoryItems.AddRange(
+                // 1) Expired (< 0 годин): Шпинат прострочений на 2 дні
+                new InventoryItem
+                {
+                    Id = Guid.Parse("0192e2b2-0000-7000-8000-000000000001"),
+                    HouseholdId = MainHouseholdId,
+                    ProductId = SpinachProductId,
+                    Location = "Fridge",
+                    Quantity = 50.0m,
+                    Unit = "g",
+                    ExpiresAt = DateTime.UtcNow.AddDays(-2),
+                    OpenedAt = DateTime.UtcNow.AddDays(-3),
+                    CreatedAt = DateTime.UtcNow.AddDays(-3),
+                    UpdatedAt = DateTime.UtcNow.AddDays(-3)
+                },
+                // 2) Critical (< 24 годин): Молоко збігає через 14 годин
+                new InventoryItem
+                {
+                    Id = Guid.Parse("0192e2b2-0000-7000-8000-000000000002"),
+                    HouseholdId = MainHouseholdId,
+                    ProductId = MilkProductId,
+                    Location = "Fridge",
+                    Quantity = 800.0m,
+                    Unit = "ml",
+                    ExpiresAt = DateTime.UtcNow.AddHours(14),
+                    OpenedAt = DateTime.UtcNow.AddDays(-2),
+                    CreatedAt = DateTime.UtcNow.AddDays(-2),
+                    UpdatedAt = DateTime.UtcNow.AddDays(-2)
+                },
+                // 3) Expiring Soon (1-3 дні): Куряче філе збігає через 2 дні (150г)
+                new InventoryItem
+                {
+                    Id = Guid.Parse("0192e2b2-0000-7000-8000-000000000003"),
+                    HouseholdId = MainHouseholdId,
+                    ProductId = ChickenProductId,
+                    Location = "Fridge",
+                    Quantity = 150.0m,
+                    Unit = "g",
+                    ExpiresAt = DateTime.UtcNow.AddDays(2),
+                    OpenedAt = null,
+                    CreatedAt = DateTime.UtcNow.AddDays(-1),
+                    UpdatedAt = DateTime.UtcNow.AddDays(-1)
+                },
+                // 4) Fresh (Pantry, 3 місяці): Вівсяні пластівці
+                new InventoryItem
+                {
+                    Id = Guid.Parse("0192e2b2-0000-7000-8000-000000000004"),
+                    HouseholdId = MainHouseholdId,
+                    ProductId = OatmealProductId,
+                    Location = "Pantry",
+                    Quantity = 500.0m,
+                    Unit = "g",
+                    ExpiresAt = DateTime.UtcNow.AddMonths(3),
+                    OpenedAt = null,
+                    CreatedAt = DateTime.UtcNow.AddDays(-5),
+                    UpdatedAt = DateTime.UtcNow.AddDays(-5)
+                },
+                // 5) Fresh (Pantry, 6 місяців): Гречана крупа (100г)
+                new InventoryItem
+                {
+                    Id = Guid.Parse("0192e2b2-0000-7000-8000-000000000005"),
+                    HouseholdId = MainHouseholdId,
+                    ProductId = BuckwheatProductId,
+                    Location = "Pantry",
+                    Quantity = 100.0m,
+                    Unit = "g",
+                    ExpiresAt = DateTime.UtcNow.AddMonths(6),
+                    OpenedAt = null,
+                    CreatedAt = DateTime.UtcNow.AddDays(-5),
+                    UpdatedAt = DateTime.UtcNow.AddDays(-5)
+                }
+            );
+            await db.SaveChangesAsync();
+        }
+
+        // 8. Базовий список покупок (Shopping List Items)
+        if (!await db.ShoppingListItems.AnyAsync(s => s.HouseholdId == MainHouseholdId))
+        {
+            db.ShoppingListItems.AddRange(
+                new ShoppingListItem
+                {
+                    Id = Guid.Parse("0192e2b5-0000-7000-8000-000000000001"),
+                    HouseholdId = MainHouseholdId,
+                    ProductName = "Грецький йогурт 2%",
+                    Quantity = 3.0m,
+                    Unit = "pcs",
+                    IsPurchased = false,
+                    AddedByUserId = OlegUserId,
+                    Version = 1,
+                    CreatedAt = DateTime.UtcNow.AddHours(-12),
+                    UpdatedAt = DateTime.UtcNow.AddHours(-12)
+                },
+                new ShoppingListItem
+                {
+                    Id = Guid.Parse("0192e2b5-0000-7000-8000-000000000002"),
+                    HouseholdId = MainHouseholdId,
+                    ProductName = "Оливкова олія Extra Virgin",
+                    Quantity = 1.0m,
+                    Unit = "pcs",
+                    IsPurchased = false,
+                    AddedByUserId = AnnaUserId,
+                    Version = 1,
+                    CreatedAt = DateTime.UtcNow.AddHours(-6),
+                    UpdatedAt = DateTime.UtcNow.AddHours(-6)
+                },
+                new ShoppingListItem
+                {
+                    Id = Guid.Parse("0192e2b5-0000-7000-8000-000000000003"),
+                    HouseholdId = MainHouseholdId,
+                    ProductName = "Курячі яйця C0",
+                    Quantity = 10.0m,
+                    Unit = "pcs",
+                    IsPurchased = true,
+                    AddedByUserId = OlegUserId,
+                    Version = 1,
+                    CreatedAt = DateTime.UtcNow.AddDays(-1),
+                    UpdatedAt = DateTime.UtcNow.AddHours(-2)
+                },
+                new ShoppingListItem
+                {
+                    Id = Guid.Parse("0192e2b5-0000-7000-8000-000000000004"),
+                    HouseholdId = MainHouseholdId,
+                    ProductName = "Банани свіжі",
+                    Quantity = 1.5m,
+                    Unit = "kg",
+                    IsPurchased = false,
+                    AddedByUserId = AnnaUserId,
+                    Version = 1,
+                    CreatedAt = DateTime.UtcNow.AddHours(-1),
+                    UpdatedAt = DateTime.UtcNow.AddHours(-1)
+                }
+            );
             await db.SaveChangesAsync();
         }
     }

@@ -71,7 +71,7 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
         builder.Property(e => e.Barcode).HasMaxLength(13);
         builder.HasIndex(e => e.Barcode)
             .IsUnique()
-            .HasFilter("barcode IS NOT NULL")
+            .HasFilter("\"Barcode\" IS NOT NULL")
             .HasDatabaseName("idx_products_barcode");
 
         builder.Property(e => e.Brand).HasMaxLength(150);
@@ -114,7 +114,7 @@ public class InventoryItemConfiguration : IEntityTypeConfiguration<InventoryItem
 
         // FEFO partial composite index
         builder.HasIndex(e => new { e.HouseholdId, e.ExpiresAt })
-            .HasFilter("quantity > 0")
+            .HasFilter("\"Quantity\" > 0")
             .HasDatabaseName("idx_inventory_fefo");
 
         builder.HasIndex(e => e.ProductId).HasDatabaseName("idx_inventory_product");
@@ -161,7 +161,7 @@ public class MealLogConfiguration : IEntityTypeConfiguration<MealLog>
 
         builder.HasIndex(e => e.IdempotencyKey)
             .IsUnique()
-            .HasFilter("idempotency_key IS NOT NULL")
+            .HasFilter("\"IdempotencyKey\" IS NOT NULL")
             .HasDatabaseName("uq_meal_logs_idempotency");
 
         builder.HasOne(e => e.User)
@@ -300,7 +300,7 @@ public class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage
         builder.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
         builder.HasIndex(e => e.CreatedAt)
-            .HasFilter("status = 'PENDING'")
+            .HasFilter("\"Status\" = 'PENDING'")
             .HasDatabaseName("idx_outbox_pending");
     }
 }
