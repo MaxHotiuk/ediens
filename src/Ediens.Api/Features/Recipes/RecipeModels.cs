@@ -3,10 +3,19 @@ using Ediens.Api.Features.Meals;
 
 namespace Ediens.Api.Features.Recipes;
 
+public record RecipeIngredientDto(
+    [property: JsonPropertyName("productId")] Guid ProductId,
+    [property: JsonPropertyName("productName")] string ProductName,
+    [property: JsonPropertyName("quantity")] decimal Quantity,
+    [property: JsonPropertyName("unit")] string Unit,
+    [property: JsonPropertyName("isAvailable")] bool IsAvailable
+);
+
 public record RecipeRecommendationItem(
     [property: JsonPropertyName("recipeId")] Guid RecipeId,
     [property: JsonPropertyName("title")] string Title,
     [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("instructions")] string Instructions,
     [property: JsonPropertyName("prepTimeMinutes")] int PrepTimeMinutes,
     [property: JsonPropertyName("calories")] decimal Calories,
     [property: JsonPropertyName("protein")] decimal Protein,
@@ -15,8 +24,28 @@ public record RecipeRecommendationItem(
     [property: JsonPropertyName("matchScore")] decimal MatchScore,
     [property: JsonPropertyName("expiringIngredientsCount")] int ExpiringIngredientsCount,
     [property: JsonPropertyName("missingIngredientsCount")] int MissingIngredientsCount,
-    [property: JsonPropertyName("canCookImmediately")] bool CanCookImmediately
-);
+    [property: JsonPropertyName("canCookImmediately")] bool CanCookImmediately,
+    [property: JsonPropertyName("ingredients")] List<RecipeIngredientDto> Ingredients
+)
+{
+    [JsonPropertyName("id")]
+    public Guid Id => RecipeId;
+
+    [JsonPropertyName("totalCalories")]
+    public decimal TotalCalories => Calories;
+
+    [JsonPropertyName("totalProtein")]
+    public decimal TotalProtein => Protein;
+
+    [JsonPropertyName("totalFat")]
+    public decimal TotalFat => Fat;
+
+    [JsonPropertyName("totalCarbs")]
+    public decimal TotalCarbs => Carbs;
+
+    [JsonPropertyName("expiringStockMatchScore")]
+    public decimal ExpiringStockMatchScore => MatchScore;
+}
 
 public record RecipeRecommendationListResponse(
     [property: JsonPropertyName("householdId")] Guid HouseholdId,

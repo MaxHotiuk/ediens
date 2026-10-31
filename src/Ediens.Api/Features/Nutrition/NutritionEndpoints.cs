@@ -143,6 +143,73 @@ public static class NutritionEndpoints
         .WithName("GetNutritionTargets")
         .WithSummary("Отримати поточний цільовий профіль КБЖВ користувача");
 
+        // 3. GET /api/v1/nutrition/progress
+        endpoints.MapGet("/api/v1/nutrition/progress", async (
+            Guid? userId,
+            string? date,
+            HttpContext context,
+            EdiensDbContext db,
+            CancellationToken ct) =>
+        {
+            var effectiveUserId = userId ?? UserContext.GetCurrentUserId(context);
+
+            DateOnly targetDate;
+            if (!string.IsNullOrWhiteSpace(date) && DateOnly.TryParse(date, out var parsedDate))
+            {
+                targetDate = parsedDate;
+            }
+            else
+            {
+                targetDate = DateOnly.FromDateTime(DateTime.UtcNow);
+            }
+
+            var target = await db.NutritionTargets
+                .Where(t => t.UserId == effectiveUserId && t.EffectiveFrom <= targetDate)
+                .OrderByDescending(t => t.EffectiveFrom)
+                .FirstOrDefaultAsync(ct);
+
+            var targetCalories = target?.TargetCalories ?? 2200m;
+            var targetProtein = target?.TargetProtein ?? 160m;
+            var targetFat = target?.TargetFat ?? 65m;
+            var targetCarbs = target?.TargetCarbs ?? 240m;
+
+            var dayStart = targetDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            var dayEnd = dayStart.AddDays(1);
+
+            var meals = await db.MealLogs
+                .Where(m => m.UserId == effectiveUserId && m.LoggedAt >= dayStart && m.LoggedAt < dayEnd)
+                .ToListAsync(ct);
+
+            decimal currentCalories = meals.Sum(m => m.Calories);
+            decimal currentProtein = meals.Sum(m => m.Protein);
+            decimal currentFat = meals.Sum(m => m.Fat);
+            decimal currentCarbs = meals.Sum(m => m.Carbs);
+
+            decimal remainingCalories = Math.Max(0m, Math.Round(targetCalories - currentCalories, 1));
+            decimal remainingProtein = Math.Max(0m, Math.Round(targetProtein - currentProtein, 1));
+            decimal remainingFat = Math.Max(0m, Math.Round(targetFat - currentFat, 1));
+            decimal remainingCarbs = Math.Max(0m, Math.Round(targetCarbs - currentCarbs, 1));
+
+            decimal calPct = targetCalories > 0 ? Math.Round((currentCalories / targetCalories) * 100m, 1) : 0m;
+            decimal protPct = targetProtein > 0 ? Math.Round((currentProtein / targetProtein) * 100m, 1) : 0m;
+            decimal fatPct = targetFat > 0 ? Math.Round((currentFat / targetFat) * 100m, 1) : 0m;
+            decimal carbsPct = targetCarbs > 0 ? Math.Round((currentCarbs / targetCarbs) * 100m, 1) : 0m;
+
+            var response = new MacroProgressResponse(
+                Calories: new MacroProgressItem(currentCalories, targetCalories, remainingCalories),
+                Protein: new MacroProgressItem(currentProtein, targetProtein, remainingProtein),
+                Fat: new MacroProgressItem(currentFat, targetFat, remainingFat),
+                Carbs: new MacroProgressItem(currentCarbs, targetCarbs, remainingCarbs),
+                RemainingCalories: remainingCalories,
+                RemainingProtein: remainingProtein,
+                Percentages: new MacroPercentages(calPct, protPct, fatPct, carbsPct)
+            );
+
+            return Results.Ok(response);
+        })
+        .WithName("GetMacroProgress")
+        .WithSummary("Отримати щоденний прогрес споживання макронутрієнтів та залишок бюджету");
+
         return endpoints;
     }
 }

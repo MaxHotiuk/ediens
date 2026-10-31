@@ -64,19 +64,30 @@ public static class RecipeEndpoints
             {
                 int expiringCount = 0;
                 int missingCount = 0;
+                var ingredientDtos = new List<RecipeIngredientDto>();
 
                 foreach (var ingredient in recipe.Ingredients)
                 {
                     var matchingBatches = inventoryItems
                         .Where(i => i.ProductId == ingredient.ProductId ||
-                                    string.Equals(i.Product.Name, ingredient.Product.Name, StringComparison.OrdinalIgnoreCase))
+                                    (i.Product != null && ingredient.Product != null &&
+                                     string.Equals(i.Product.Name, ingredient.Product.Name, StringComparison.OrdinalIgnoreCase)))
                         .ToList();
 
                     var availableQty = matchingBatches.Sum(b => b.Quantity);
-                    if (availableQty < ingredient.Quantity)
+                    bool isAvailable = availableQty >= ingredient.Quantity;
+                    if (!isAvailable)
                     {
                         missingCount++;
                     }
+
+                    ingredientDtos.Add(new RecipeIngredientDto(
+                        ProductId: ingredient.ProductId,
+                        ProductName: ingredient.Product?.Name ?? "Інгредієнт",
+                        Quantity: ingredient.Quantity,
+                        Unit: ingredient.Unit,
+                        IsAvailable: isAvailable
+                    ));
 
                     // Перевіряємо, чи є партії, термін яких збігає < 72 годин
                     if (matchingBatches.Any(b => (b.ExpiresAt - now).TotalHours <= 72))
@@ -96,6 +107,7 @@ public static class RecipeEndpoints
                     RecipeId: recipe.Id,
                     Title: recipe.Title,
                     Description: recipe.Description,
+                    Instructions: recipe.Instructions,
                     PrepTimeMinutes: recipe.PrepTimeMinutes,
                     Calories: recipe.TotalCalories,
                     Protein: recipe.TotalProtein,
@@ -104,7 +116,8 @@ public static class RecipeEndpoints
                     MatchScore: Math.Round(matchScore, 1),
                     ExpiringIngredientsCount: expiringCount,
                     MissingIngredientsCount: missingCount,
-                    CanCookImmediately: canCookImmediately
+                    CanCookImmediately: canCookImmediately,
+                    Ingredients: ingredientDtos
                 ));
             }
 
