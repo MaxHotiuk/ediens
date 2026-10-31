@@ -2,6 +2,7 @@ using Ediens.Api.Common.Errors;
 using Ediens.Api.Data;
 using Ediens.Api.Entities;
 using Ediens.Api.Features.Common;
+using Ediens.Api.Features.Households;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -149,6 +150,73 @@ public static class ShoppingListEndpoints
         })
         .WithName("GetShoppingList")
         .WithSummary("Отримати поточний список покупок домогосподарства");
+
+        // 3. DELETE /api/v1/households/{id}/shopping-list/items/{itemId}
+        group.MapDelete("/items/{itemId:guid}", async (
+            Guid id,
+            Guid itemId,
+            HttpContext context,
+            EdiensDbContext db,
+            CancellationToken ct) =>
+        {
+            var userId = UserContext.GetCurrentUserId(context);
+
+            if (!await HouseholdAccessValidator.IsMemberAsync(db, id, userId, ct))
+            {
+                return EdiensResults.Forbidden(
+                    context.Request.Path,
+                    $"The authenticated user is not a registered member of household '{id}'.",
+                    householdId: id);
+            }
+
+            var item = await db.ShoppingListItems
+                .FirstOrDefaultAsync(s => s.Id == itemId && s.HouseholdId == id, ct);
+
+            if (item != null)
+            {
+                db.ShoppingListItems.Remove(item);
+                await db.SaveChangesAsync(ct);
+            }
+
+            return Results.NoContent();
+        })
+        .WithName("DeleteShoppingListItem")
+        .WithSummary("Видалити товар зі списку покупок");
+
+        // 4. DELETE /api/v1/households/{id}/shopping-list/purchased
+        group.MapDelete("/purchased", async (
+            Guid id,
+            HttpContext context,
+            EdiensDbContext db,
+            CancellationToken ct) =>
+        {
+            var userId = UserContext.GetCurrentUserId(context);
+
+            if (!await HouseholdAccessValidator.IsMemberAsync(db, id, userId, ct))
+            {
+                return EdiensResults.Forbidden(
+                    context.Request.Path,
+                    $"The authenticated user is not a registered member of household '{id}'.",
+                    householdId: id);
+            }
+
+            var purchasedItems = await db.ShoppingListItems
+                .Where(s => s.HouseholdId == id && s.IsPurchased)
+                .ToListAsync(ct);
+
+            if (purchasedItems.Count > 0)
+            {
+                db.ShoppingListItems.RemoveRange(purchasedItems);
+                await db.SaveChangesAsync(ct);
+            }
+
+            return Results.NoContent();
+        })
+        .WithName("ClearPurchasedShoppingListItems")
+        .WithSummary("Очистити всі придбані товари зі списку покупок");
+
+        // Map Households endpoint
+        endpoints.MapHouseholdEndpoints();
 
         return endpoints;
     }
