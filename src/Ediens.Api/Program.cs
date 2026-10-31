@@ -87,19 +87,21 @@ app.MapGet("/api/v1/ping", () => Results.Ok(new
 // 7. Реєстрація всіх вертикальних слайсів та REST-ендпоінтів платформи ēdiens
 app.MapEdiensEndpoints();
 
-// Автоматичний демо-сідінг при наявності зв'язку з БД
+// Автоматичне створення схеми та демо-сідінг при наявності зв'язку з БД
 try
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<EdiensDbContext>();
     if (db.Database.CanConnect())
     {
+        await db.Database.EnsureCreatedAsync();
         await Ediens.Api.Features.Common.DatabaseSeeder.SeedAsync(db);
+        app.Logger.LogInformation("База даних PostgreSQL успішно ініціалізована та заповнена базовими даними.");
     }
 }
-catch
+catch (Exception ex)
 {
-    // Ігноруємо якщо база даних ще не ініціалізована або запускається в ізольованому тестовому середовищі
+    app.Logger.LogWarning(ex, "Помилка автоматичної ініціалізації бази даних. Можливо, сервіс БД недоступний.");
 }
 
 app.Run();
