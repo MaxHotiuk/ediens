@@ -33,7 +33,37 @@ else
     builder.Services.AddDistributedMemoryCache();
 }
 
-// 3. Реєстрація RFC 9457 ProblemDetails та Rate Limiter
+// 3. Реєстрація CORS для клієнта Vite (5173, 80, 3000) та RFC 9457 ProblemDetails / Rate Limiter
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("EdiensCorsPolicy", policy =>
+    {
+        policy.WithOrigins(
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://localhost:80",
+            "http://localhost",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:80",
+            "http://127.0.0.1"
+        )
+        .SetIsOriginAllowed(origin =>
+        {
+            if (string.IsNullOrEmpty(origin)) return false;
+            if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+            {
+                return uri.Host == "localhost" || uri.Host == "127.0.0.1";
+            }
+            return false;
+        })
+        .AllowAnyMethod()
+        .AllowAnyHeader()
+        .AllowCredentials()
+        .WithExposedHeaders("ETag", "Retry-After", "X-Correlation-Id", "Location");
+    });
+});
+
 builder.Services.AddProblemDetails();
 builder.Services.AddEdiensRateLimiting();
 
@@ -45,6 +75,9 @@ var app = builder.Build();
 // 5. Middleware Pipeline
 // Першим реєструється глобальний перехоплювач винятків RFC 9457
 app.UseMiddleware<EdiensExceptionHandlerMiddleware>();
+
+// CORS для підтримки веб-клієнтів
+app.UseCors("EdiensCorsPolicy");
 
 // Built-in SlidingWindowRateLimiter
 app.UseRateLimiter();
@@ -87,21 +120,84 @@ app.MapGet("/api/v1/ping", () => Results.Ok(new
 // 7. Реєстрація всіх вертикальних слайсів та REST-ендпоінтів платформи ēdiens
 app.MapEdiensEndpoints();
 
-// Автоматичне створення схеми та демо-сідінг при наявності зв'язку з БД
+// Автоматичне створення схеми / міграція та демо-сідінг при запуску
 try
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<EdiensDbContext>();
-    if (db.Database.CanConnect())
+    var logger = app.Logger;
+
+    if (db.Database.IsRelational())
+    {
+        bool connected = false;
+        int maxRetries = 5;
+        for (int retry = 1; retry <= maxRetries; retry++)
+        {
+            try
+            {
+                if (await db.Database.CanConnectAsync())
+                {
+                    connected = true;
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Перевірка зв'язку з PostgreSQL (спроба {Retry}/{MaxRetries})", retry, maxRetries);
+            }
+
+            if (retry < maxRetries)
+            {
+                logger.LogInformation("Очікування готовності PostgreSQL (спроба {Retry}/{MaxRetries})...", retry, maxRetries);
+                await Task.Delay(2000);
+            }
+        }
+
+        if (connected)
+        {
+            try
+            {
+                if (db.Database.GetPendingMigrations().Any())
+                {
+                    logger.LogInformation("Застосування міграцій EF Core...");
+                    await db.Database.MigrateAsync();
+                }
+                else
+                {
+                    await db.Database.EnsureCreatedAsync();
+                }
+
+                await Ediens.Api.Features.Common.DatabaseSeeder.SeedAsync(db);
+                logger.LogInformation("База даних PostgreSQL успішно ініціалізована та заповнена базовими даними.");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Критична помилка ініціалізації схеми або міграції PostgreSQL.");
+                throw;
+            }
+        }
+        else
+        {
+            logger.LogError("Неможливо встановити з'єднання з базою даних PostgreSQL після {MaxRetries} спроб.", maxRetries);
+            if (!app.Environment.IsDevelopment() && !app.Environment.IsEnvironment("Testing"))
+            {
+                throw new InvalidOperationException("Failed to connect to PostgreSQL database on startup.");
+            }
+        }
+    }
+    else
     {
         await db.Database.EnsureCreatedAsync();
         await Ediens.Api.Features.Common.DatabaseSeeder.SeedAsync(db);
-        app.Logger.LogInformation("База даних PostgreSQL успішно ініціалізована та заповнена базовими даними.");
     }
 }
 catch (Exception ex)
 {
-    app.Logger.LogWarning(ex, "Помилка автоматичної ініціалізації бази даних. Можливо, сервіс БД недоступний.");
+    app.Logger.LogError(ex, "Помилка автоматичної ініціалізації бази даних.");
+    if (!app.Environment.IsDevelopment() && !app.Environment.IsEnvironment("Testing"))
+    {
+        throw;
+    }
 }
 
 app.Run();
