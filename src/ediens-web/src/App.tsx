@@ -424,11 +424,11 @@ export function App() {
           <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 space-y-1">
             <div className="font-semibold text-white flex items-center gap-1.5">
               <CheckCircle className="h-3.5 w-3.5 text-sky-400" />
-              <span>4. Спільний список покупок (Offline-First)</span>
+              <span>4. Спільний список покупок</span>
             </div>
             <p className="text-zinc-400 text-[11px]">
-              Повна підтримка офлайн-роботи в супермаркеті через LocalStorage; перемикання мережевого режиму;
-              синхронізація локальних змін злиттям через POST /shopping-list/sync.
+              Надійне збереження у базі даних PostgreSQL через .NET EF Core; миттєва синхронізація
+              спільних покупок сім&apos;ї через POST /shopping-list/sync.
             </p>
           </div>
         </div>

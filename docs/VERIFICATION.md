@@ -195,14 +195,16 @@ AUTO_BOOT=1 ./scripts/verify.sh --smoke
 | **FIX-04** | Харчування, прогрес КБЖВ, 1-Click Cook списання, обробка дефіциту 422 | `DONE` | `GET /api/v1/nutrition/progress`, `GET /api/v1/meals`, списання інгредієнтів за FEFO, 422 модалка |
 | **FIX-05** | Домогосподарства, синхронізація списку покупок, offline queue LWW, OpenAPI | `DONE` | `GET /api/v1/households`, синхронізація з Last-Write-Wins, узгодження `Ediens_OpenAPI.yaml` |
 | **FIX-06** | Docker Compose інтеграція, Nginx проксі, видалення залишків моків, E2E Smoke Suite | `DONE` | 31/31 димових тестів пройдено, повне видалення `mockStore.ts`, Nginx проксі з прокиданням заголовків |
+| **FIX-07** | Ліквідація браузерних моків (localStorage) та впровадження 100% реальної персистентності в PostgreSQL через EF Core | `DONE` | Повний демонтаж localStorage з frontend; пряма live-перевірка psql у smoke-test; валідація БД у /health |
 
 ### 5.1 Результати запуску E2E Smoke Test Suite (`scripts/smoke-test.sh`)
 
 - **Перевірка базового стану:**
-  - `GET /health`: HTTP 200 OK (`Healthy`)
+  - `GET /health`: HTTP 200 OK (`Healthy`, `database: Connected`)
   - `GET /api/v1/ping`: HTTP 200 OK (`pong`)
 - **Позитивні тести OpenAPI маршрутів (14 ендпоінтів):**
   - `POST /api/v1/inventory/items`: HTTP 201 Created (з поверненням ETag)
+  - `Пряма перевірка psql`: підтвердження наявності створеного рядка в таблиці `inventory_items` PostgreSQL (`count: 1`)
   - `GET /api/v1/inventory/items?householdId=...`: HTTP 200 OK (FEFO сортування)
   - `GET /api/v1/inventory/items/{id}`: HTTP 200 OK
   - `PATCH /api/v1/inventory/items/{id}` (з `If-Match: W/"..."`): HTTP 200 OK
@@ -226,5 +228,28 @@ AUTO_BOOT=1 ./scripts/verify.sh --smoke
   - `HTTP 422`: `errorCode: INSUFFICIENT_INVENTORY` (приготування страви за браком продуктів)
   - `HTTP 429`: `errorCode: RATE_LIMIT_EXCEEDED` (перевищення ліміту частоти запитів + заголовок `Retry-After: 30`)
 
-**Підсумок:** Платформа ēdiens повністю позбавлена штучних заглушок, мок-масивів та емуляцій помилок. Усі клієнтські операції успішно виконуються проти реальної реляційної СУБД PostgreSQL 17 та бекенду ASP.NET Core 8.
+### 5.2 Звіт про виконання FIX-07: Реальна персистентність у PostgreSQL через EF Core
+
+1. **Ліквідація браузерних моків сховища (`localStorage` / `sessionStorage`):**
+   - Повністю видалено збереження бізнес-даних (`ediens_shopping_items_cache`, `ediens_shopping_offline_queue`, `ediens_offline_sim`) з `ShoppingListView.tsx`.
+   - Всі операції списку покупок (додавання, оновлення статусу, видалення, очищення куплених) переведені на типізовані виклики `ediensApi.shoppingList` (`GET /households/{id}/shopping-list`, `POST /households/{id}/shopping-list/sync`, `DELETE /households/{id}/shopping-list/items/{id}`, `DELETE /households/{id}/shopping-list/purchased`).
+   - У `client.ts` усунено `localStorage.getItem('ediens_access_token')` на користь безпечного in-memory token holder (`getAuthToken()` / `setAuthToken()`).
+   - Додано статичний гейт у `scripts/verify.sh`, що сканує `src/ediens-web/src/{features,pages,api,store}` на будь-які виклики `localStorage.(setItem|getItem)` та `sessionStorage.(setItem|getItem)`.
+
+2. **Підтвердження реальної персистентності в PostgreSQL (`src/Ediens.Api`):**
+   - `EdiensDbContext` зареєстровано через `options.UseNpgsql()` з підключенням до контейнера `postgres` (база `ediens`).
+   - Створено `src/Ediens.Api/Data/DbInitializer.cs` із методом `SeedAsync(db)` для автоматичного наповнення фізичної БД при старті сервісу.
+   - Ендпоінт `GET /health` розширено перевіркою реального з'єднання з базою через `await db.Database.CanConnectAsync()`. При недоступності PostgreSQL повертається HTTP 503 Service Unavailable.
+
+3. **Верифікація збереження через прямі SQL-запити (`psql`):**
+   - У `scripts/smoke-test.sh` впроваджено крок прямого запиту до PostgreSQL:
+     ```bash
+     docker compose exec -T postgres psql -U postgres -d ediens -tAc \
+       "SELECT count(*) FROM inventory_items WHERE \"Id\" = '$CREATED_ITEM_ID';"
+     ```
+     що гарантує фізичне створення та збереження рядка в базі даних.
+   - Всі 32 димові тести успішно пройдено (0 помилок).
+
+**Підсумок:** Платформа ēdiens повністю позбавлена штучних заглушок, мок-масивів та емуляцій збереження в LocalStorage. Усі клієнтські операції (React UI -> Axios API -> ASP.NET Core Minimal API -> EF Core -> PostgreSQL) виконуються проти реальної реляційної СУБД PostgreSQL 17.
+
 

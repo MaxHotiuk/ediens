@@ -55,10 +55,21 @@ export const axiosInstance: AxiosInstance = axios.create({
   },
 });
 
+// In-memory Auth Token holder (no browser storage persistence)
+let activeAuthToken: string | null = null;
+
+export function setAuthToken(token: string | null): void {
+  activeAuthToken = token;
+}
+
+export function getAuthToken(): string | null {
+  return activeAuthToken;
+}
+
 // Request Interceptor: Attach Auth Token, W3C TraceContext, and Idempotency-Key
 axiosInstance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('ediens_access_token') : null;
+    const token = getAuthToken();
     if (token) {
       config.headers.set('Authorization', `Bearer ${token}`);
     }
@@ -285,6 +296,10 @@ export const ediensApi = {
       }
       return [];
     },
+
+    async deleteMeal(id: string): Promise<void> {
+      await axiosInstance.delete(`/meals/${id}`);
+    },
   },
 
   /**
@@ -423,6 +438,16 @@ export const ediensApi = {
         return res.data;
       }
       return [];
+    },
+
+    async deleteItem(householdId: string, itemId: string): Promise<void> {
+      const id = householdId || DEFAULT_HOUSEHOLD_ID;
+      await axiosInstance.delete(`/households/${id}/shopping-list/items/${itemId}`);
+    },
+
+    async clearPurchased(householdId: string): Promise<void> {
+      const id = householdId || DEFAULT_HOUSEHOLD_ID;
+      await axiosInstance.delete(`/households/${id}/shopping-list/purchased`);
     },
   },
 
