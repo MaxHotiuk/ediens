@@ -79,40 +79,79 @@ export function parseProblemDetails(error: unknown): ProblemDetails {
     headers?: Record<string, string>;
   };
 
-  const status = response.status || (typeof errObj?.status === 'number' ? errObj.status : 500);
+  const status =
+    response.status ||
+    (typeof errObj?.status === 'number' ? errObj.status : undefined) ||
+    (errObj?.code === 'ECONNREFUSED' || errObj?.message === 'Network Error' ? 503 : 500);
+
   const data = (response.data && typeof response.data === 'object' ? response.data : {}) as Record<string, unknown>;
 
   // Check headers for Retry-After or ETag
-  const headers = response.headers || {};
+  const headers = (response.headers || {}) as Record<string, string>;
   const etagHeader = headers['etag'] || headers['ETag'];
   const retryAfterHeader = headers['retry-after'] || headers['Retry-After'];
 
-  const type =
-    (typeof data.type === 'string' && data.type) ||
-    `https://ediens.app/errors/${status === 409 ? 'concurrent-modification' : 'generic-error'}`;
+  let type = typeof data.type === 'string' && data.type ? data.type : '';
+  if (!type) {
+    if (status === 409) {
+      type = 'https://ediens.app/errors/concurrent-modification';
+    } else if (status === 422) {
+      type = 'https://ediens.app/errors/insufficient-inventory';
+    } else {
+      type = `https://ediens.app/errors/http-${status}`;
+    }
+  }
 
   const title =
     (typeof data.title === 'string' && data.title) ||
-    (status === 400 ? 'Validation Error' :
-     status === 403 ? 'Household Access Denied' :
-     status === 404 ? 'Resource Not Found' :
-     status === 409 ? 'Conflict during state modification' :
-     status === 422 ? 'Unprocessable Entity' :
-     status === 429 ? 'Rate Limit Exceeded' :
-     status === 503 ? 'External Service Unavailable' : 'Server Error');
+    (status === 400
+      ? 'Validation Error'
+      : status === 401
+      ? 'Unauthorized Access'
+      : status === 403
+      ? 'Household Access Denied'
+      : status === 404
+      ? 'Resource Not Found'
+      : status === 409
+      ? 'Conflict during state modification'
+      : status === 422
+      ? 'Unprocessable Entity'
+      : status === 429
+      ? 'Rate Limit Exceeded'
+      : status === 503
+      ? 'External Service Unavailable'
+      : 'Server Error');
 
   let errorCode = typeof data.errorCode === 'string' ? (data.errorCode as ProblemErrorCode) : '';
   if (!errorCode) {
     switch (status) {
-      case 400: errorCode = 'VALIDATION_FAILED'; break;
-      case 401: errorCode = 'UNAUTHORIZED_ACCESS'; break;
-      case 403: errorCode = 'HOUSEHOLD_ACCESS_DENIED'; break;
-      case 404: errorCode = 'ITEM_NOT_FOUND'; break;
-      case 409: errorCode = 'CONCURRENT_MODIFICATION'; break;
-      case 422: errorCode = 'INSUFFICIENT_INVENTORY'; break;
-      case 429: errorCode = 'RATE_LIMIT_EXCEEDED'; break;
-      case 503: errorCode = 'EXTERNAL_SERVICE_UNAVAILABLE'; break;
-      default: errorCode = 'INTERNAL_SERVER_ERROR'; break;
+      case 400:
+        errorCode = 'VALIDATION_FAILED';
+        break;
+      case 401:
+        errorCode = 'UNAUTHORIZED_ACCESS';
+        break;
+      case 403:
+        errorCode = 'HOUSEHOLD_ACCESS_DENIED';
+        break;
+      case 404:
+        errorCode = 'ITEM_NOT_FOUND';
+        break;
+      case 409:
+        errorCode = 'CONCURRENT_MODIFICATION';
+        break;
+      case 422:
+        errorCode = 'INSUFFICIENT_INVENTORY';
+        break;
+      case 429:
+        errorCode = 'RATE_LIMIT_EXCEEDED';
+        break;
+      case 503:
+        errorCode = 'EXTERNAL_SERVICE_UNAVAILABLE';
+        break;
+      default:
+        errorCode = 'INTERNAL_SERVER_ERROR';
+        break;
     }
   }
 
@@ -120,15 +159,41 @@ export function parseProblemDetails(error: unknown): ProblemDetails {
     (typeof data.traceId === 'string' && data.traceId) ||
     headers['traceparent'] ||
     headers['x-trace-id'] ||
-    undefined;
+    headers['x-correlation-id'] ||
+    (typeof errObj?.traceId === 'string' ? errObj.traceId : undefined);
 
-  const detail = typeof data.detail === 'string' ? data.detail : undefined;
+  const detail =
+    typeof data.detail === 'string'
+      ? data.detail
+      : errObj?.message && typeof errObj.message === 'string'
+      ? errObj.message
+      : undefined;
+
   const instance = typeof data.instance === 'string' ? data.instance : undefined;
 
   const extensions: Record<string, unknown> =
     data.extensions && typeof data.extensions === 'object'
       ? { ...(data.extensions as Record<string, unknown>) }
       : {};
+
+  // Copy any custom root-level fields in data to extensions
+  const standardKeys = new Set([
+    'type',
+    'title',
+    'status',
+    'detail',
+    'instance',
+    'errorCode',
+    'traceId',
+    'timestamp',
+    'errors',
+    'extensions',
+  ]);
+  for (const key of Object.keys(data)) {
+    if (!standardKeys.has(key) && !(key in extensions)) {
+      extensions[key] = data[key];
+    }
+  }
 
   // Inject header fallback if missing in extensions
   if (etagHeader && !extensions.currentETag) {
@@ -212,8 +277,7 @@ export function handleApiError(error: unknown): EdiensApiError {
 
     case 429: {
       // Rate limit exceeded -> RateLimitBanner with countdown timer
-      const retryAfter =
-        (problem.extensions?.retryAfterSeconds as number) || 30;
+      const retryAfter = (problem.extensions?.retryAfterSeconds as number) || 30;
       errorBus.emit<RateLimitExtensions>('rate-limit-exceeded', {
         retryAfterSeconds: retryAfter,
         ...(problem.extensions as Record<string, unknown>),
@@ -243,8 +307,7 @@ export function handleApiError(error: unknown): EdiensApiError {
  * Event subscription helpers for React components
  */
 export const ErrorListeners = {
-  onValidationError: (cb: (problem: ProblemDetails) => void) =>
-    errorBus.on<ProblemDetails>('validation-error', cb),
+  onValidationError: (cb: (problem: ProblemDetails) => void) => errorBus.on<ProblemDetails>('validation-error', cb),
 
   onHouseholdAccessDenied: (cb: (problem: ProblemDetails<HouseholdAccessDeniedExtensions>) => void) =>
     errorBus.on<ProblemDetails<HouseholdAccessDeniedExtensions>>('household-access-denied', cb),
