@@ -1,0 +1,29 @@
+{
+  "id": "QOL-04",
+  "title": "Recipe Multi-Servings Scaling, Meal Type Dispatch & 1-Click Shortfall Purchase",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": "2026-10-31T21:30:00Z",
+  "branch": "feat/QOL-04-recipe-servings-and-shortfall-purchase",
+  "dependencies": [
+    "FIX-07"
+  ],
+  "allowed_paths": [
+    "src/Ediens.Api/Features/Recipes/**",
+    "src/ediens-web/src/features/recipes/**",
+    "src/ediens-web/src/api/client.ts"
+  ],
+  "deliverables": [
+    "src/Ediens.Api/Features/Recipes/RecipeEndpoints.cs",
+    "src/ediens-web/src/features/recipes/RecipeCard.tsx",
+    "src/ediens-web/src/features/recipes/RecipeRecommendationView.tsx",
+    "src/ediens-web/src/api/client.ts"
+  ],
+  "acceptance_criteria": [
+    "Add an interactive Servings Stepper (1 to 8 portions) in RecipeCard.tsx that dynamically recalculates required ingredient quantities and total recipe macros in real-time.",
+    "Add Meal Type selector (Сніданок / Обід / Вечеря / Перекус) in RecipeCard.tsx and pass selected type and servings to POST /api/v1/recipes/{id}/cook.",
+    "When recipe ingredients are missing, display an immediate 'Купити бракуючі (N)' button directly on the card to add exact shortfall to the shopping list with 1 click without requiring a 422 error cycle.",
+    "Replace developer jargon like 'Приготувати (422 Тест)' with clean user-facing state ('Не вистачає інгредієнтів').",
+    "After successful 1-Click Cook, show toast with actual cooked servings and meal type, and refresh inventory stock and macro progress."
+  ]
+}

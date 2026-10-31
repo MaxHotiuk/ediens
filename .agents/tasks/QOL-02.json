@@ -1,0 +1,34 @@
+{
+  "id": "QOL-02",
+  "title": "Inventory Batch Editing, Location Relocation & Quick Spoiled Disposal",
+  "status": "IN_PROGRESS",
+  "assigned_to": "voyager-ASUS",
+  "updated_at": "2026-10-31T22:13:55Z",
+  "branch": "feat/QOL-02-inventory-edit-and-spoilage",
+  "dependencies": [
+    "FIX-07"
+  ],
+  "allowed_paths": [
+    "src/Ediens.Api/Features/Inventory/**",
+    "src/ediens-web/src/features/inventory/**",
+    "src/ediens-web/src/api/client.ts",
+    "src/Ediens.Tests/**"
+  ],
+  "deliverables": [
+    "src/Ediens.Api/Features/Inventory/InventoryEndpoints.cs",
+    "src/Ediens.Api/Features/Inventory/InventoryModels.cs",
+    "src/ediens-web/src/features/inventory/InventoryDashboard.tsx",
+    "src/ediens-web/src/features/inventory/InventoryItemCard.tsx",
+    "src/ediens-web/src/features/inventory/EditInventoryModal.tsx",
+    "src/ediens-web/src/api/client.ts"
+  ],
+  "acceptance_criteria": [
+    "Extend backend PATCH /api/v1/inventory/items/{id} to support updating location (Fridge, Freezer, Pantry), expiration date (ExpiresAt), and exact quantity, while enforcing If-Match ETag concurrency validation.",
+    "Automatically clean up or archive inventory items when quantity drops to 0, preventing orphaned zero-quantity records in PostgreSQL.",
+    "Add EditInventoryModal in React frontend allowing users to edit batch location, expiration date, or quantity with one click.",
+    "In InventoryItemCard, add quick action 'Списати як зіпсоване' (calls DELETE with reason=SPOILED), recording an OutboxMessage event.",
+    "Make freshness overview cards (Критичні, Збігають скоро, Свіжі) interactive click filters in InventoryDashboard.",
+    "Add sorting dropdown in InventoryDashboard: 'За терміном придатності (FEFO)', 'За назвою (А-Я)', 'За кількістю'.",
+    "Move dev-only '409 Тест' button out of the primary card view into an optional debug toggle or testbench."
+  ]
+}

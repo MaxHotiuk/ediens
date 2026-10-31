@@ -1,0 +1,35 @@
+{
+  "id": "QOL-03",
+  "title": "Product Catalog Search API, Autocomplete & Custom Macro Meal Logging",
+  "status": "IN_PROGRESS",
+  "assigned_to": "Maxs-MacBook-Air",
+  "updated_at": "2026-10-31T22:15:08Z",
+  "branch": "feat/QOL-03-product-search-and-custom-macros",
+  "dependencies": [
+    "FIX-07"
+  ],
+  "allowed_paths": [
+    "src/Ediens.Api/Features/Products/**",
+    "src/Ediens.Api/Features/Meals/**",
+    "src/ediens-web/src/features/macros/**",
+    "src/ediens-web/src/features/inventory/AddInventoryModal.tsx",
+    "src/ediens-web/src/api/client.ts",
+    "src/Ediens.Tests/**"
+  ],
+  "deliverables": [
+    "src/Ediens.Api/Features/Products/ProductEndpoints.cs",
+    "src/Ediens.Api/Features/Products/ProductModels.cs",
+    "src/Ediens.Api/Features/Meals/MealEndpoints.cs",
+    "src/Ediens.Api/Features/Meals/MealModels.cs",
+    "src/ediens-web/src/features/macros/MealLogForm.tsx",
+    "src/ediens-web/src/features/inventory/AddInventoryModal.tsx",
+    "src/ediens-web/src/api/client.ts"
+  ],
+  "acceptance_criteria": [
+    "Implement GET /api/v1/products/search?query=...&limit=10 in backend with case-insensitive search across name and brand in PostgreSQL products table.",
+    "Update POST /api/v1/meals/log to accept optional custom nutrition values (calories, protein, fat, carbs) from client rather than overriding with hardcoded 120/6/4/15 fallback.",
+    "Fix 'pcs' calculation in MealEndpoints so piece items (like eggs, bananas) compute realistic per-unit macros rather than multiplying by 100g ratios blindly.",
+    "Add live search autocomplete dropdown in MealLogForm.tsx and AddInventoryModal.tsx that queries GET /api/v1/products/search as user types.",
+    "Selecting a searched product auto-fills product name, unit, and exact per-100g or per-piece nutritional values."
+  ]
+}

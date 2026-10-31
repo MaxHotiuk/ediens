@@ -215,6 +215,171 @@ public static class ShoppingListEndpoints
         .WithName("ClearPurchasedShoppingListItems")
         .WithSummary("Очистити всі придбані товари зі списку покупок");
 
+        // 5. POST /api/v1/households/{id}/shopping-list/transfer-to-inventory
+        group.MapPost("/transfer-to-inventory", async (
+            Guid id,
+            TransferShoppingListToInventoryRequest? request,
+            HttpContext context,
+            EdiensDbContext db,
+            CancellationToken ct) =>
+        {
+            var userId = UserContext.GetCurrentUserId(context);
+
+            if (!await HouseholdAccessValidator.IsMemberAsync(db, id, userId, ct))
+            {
+                return EdiensResults.Forbidden(
+                    context.Request.Path,
+                    $"The authenticated user is not a registered member of household '{id}'.",
+                    householdId: id);
+            }
+
+            var isRelational = db.Database.IsRelational();
+            await using var tx = isRelational ? await db.Database.BeginTransactionAsync(ct) : null;
+
+            try
+            {
+                List<ShoppingListItem> itemsToTransfer;
+                if (request?.Items != null && request.Items.Count > 0)
+                {
+                    var requestedIds = request.Items.Select(i => i.ItemId).ToList();
+                    itemsToTransfer = await db.ShoppingListItems
+                        .Include(s => s.Product)
+                        .Where(s => s.HouseholdId == id && requestedIds.Contains(s.Id))
+                        .ToListAsync(ct);
+                }
+                else
+                {
+                    itemsToTransfer = await db.ShoppingListItems
+                        .Include(s => s.Product)
+                        .Where(s => s.HouseholdId == id && s.IsPurchased)
+                        .ToListAsync(ct);
+                }
+
+                if (itemsToTransfer.Count == 0)
+                {
+                    return Results.Ok(new TransferShoppingListResponse(
+                        0,
+                        new List<TransferredInventoryItemSummary>(),
+                        "No items found for inventory transfer."
+                    ));
+                }
+
+                var overridesMap = request?.Items?.ToDictionary(i => i.ItemId) 
+                    ?? new Dictionary<Guid, TransferShoppingListItemRequest>();
+                var validLocations = new[] { "Fridge", "Freezer", "Pantry" };
+                var transferredSummaries = new List<TransferredInventoryItemSummary>();
+
+                foreach (var sItem in itemsToTransfer)
+                {
+                    overridesMap.TryGetValue(sItem.Id, out var itemOverride);
+
+                    var smart = ProductSmartClassifier.GetDefaults(sItem.ProductName);
+
+                    var location = itemOverride?.Location;
+                    if (string.IsNullOrWhiteSpace(location) || !validLocations.Contains(location, StringComparer.OrdinalIgnoreCase))
+                    {
+                        location = smart.Location;
+                    }
+
+                    DateTime expiresAt;
+                    if (itemOverride?.ExpiresAt.HasValue == true && itemOverride.ExpiresAt.Value > DateTime.MinValue)
+                    {
+                        expiresAt = itemOverride.ExpiresAt.Value.ToUniversalTime();
+                    }
+                    else
+                    {
+                        expiresAt = DateTime.UtcNow.Date.AddDays(smart.ShelfLifeDays);
+                    }
+
+                    var quantity = itemOverride?.Quantity ?? sItem.Quantity;
+                    if (quantity <= 0) quantity = sItem.Quantity > 0 ? sItem.Quantity : 1;
+
+                    var unit = !string.IsNullOrWhiteSpace(itemOverride?.Unit) ? itemOverride.Unit : sItem.Unit;
+                    if (string.IsNullOrWhiteSpace(unit)) unit = "pcs";
+
+                    // Ensure product exists
+                    Product? product = sItem.Product;
+                    if (product == null && sItem.ProductId.HasValue)
+                    {
+                        product = await db.Products.FindAsync(new object[] { sItem.ProductId.Value }, ct);
+                    }
+                    if (product == null)
+                    {
+                        product = await db.Products.FirstOrDefaultAsync(
+                            p => p.Name.ToLower() == sItem.ProductName.ToLower(), ct);
+                    }
+                    if (product == null)
+                    {
+                        product = new Product
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = sItem.ProductName.Trim(),
+                            CaloriesPer100g = 100m,
+                            ProteinPer100g = 5m,
+                            FatPer100g = 3m,
+                            CarbsPer100g = 15m,
+                            CreatedAt = DateTime.UtcNow,
+                            UpdatedAt = DateTime.UtcNow
+                        };
+                        db.Products.Add(product);
+                        await db.SaveChangesAsync(ct);
+                    }
+
+                    var inventoryItem = new InventoryItem
+                    {
+                        Id = Guid.NewGuid(),
+                        HouseholdId = id,
+                        ProductId = product.Id,
+                        Product = product,
+                        Location = location,
+                        Quantity = quantity,
+                        Unit = unit,
+                        ExpiresAt = expiresAt,
+                        OpenedAt = null,
+                        Version = 1,
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+
+                    db.InventoryItems.Add(inventoryItem);
+                    db.ShoppingListItems.Remove(sItem);
+
+                    transferredSummaries.Add(new TransferredInventoryItemSummary(
+                        inventoryItem.Id,
+                        product.Id,
+                        product.Name,
+                        inventoryItem.Location,
+                        inventoryItem.Quantity,
+                        inventoryItem.Unit,
+                        inventoryItem.ExpiresAt
+                    ));
+                }
+
+                await db.SaveChangesAsync(ct);
+
+                if (tx != null)
+                {
+                    await tx.CommitAsync(ct);
+                }
+
+                return Results.Ok(new TransferShoppingListResponse(
+                    transferredSummaries.Count,
+                    transferredSummaries,
+                    $"Successfully transferred {transferredSummaries.Count} item(s) to inventory."
+                ));
+            }
+            catch
+            {
+                if (tx != null)
+                {
+                    await tx.RollbackAsync(ct);
+                }
+                throw;
+            }
+        })
+        .WithName("TransferShoppingListToInventory")
+        .WithSummary("Атомарно перенести куплені товари зі списку покупок в інвентар домогосподарства");
+
         // Map Households endpoint
         endpoints.MapHouseholdEndpoints();
 

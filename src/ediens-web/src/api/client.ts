@@ -168,6 +168,34 @@ export interface ShoppingListSyncResponsePayload {
   items: ShoppingListItem[];
 }
 
+export interface TransferShoppingListItemPayload {
+  itemId: string;
+  location?: StorageLocation | string;
+  expiresAt?: string;
+  quantity?: number;
+  unit?: string;
+}
+
+export interface TransferShoppingListRequestPayload {
+  items?: TransferShoppingListItemPayload[];
+}
+
+export interface TransferredInventoryItemSummary {
+  id: string;
+  productId: string;
+  productName: string;
+  location: string;
+  quantity: number;
+  unit: string;
+  expiresAt: string;
+}
+
+export interface TransferShoppingListResponsePayload {
+  transferredCount: number;
+  transferredItems: TransferredInventoryItemSummary[];
+  message: string;
+}
+
 // ============================================================================
 // Type-Safe API Modules
 // ============================================================================
@@ -448,6 +476,18 @@ export const ediensApi = {
     async clearPurchased(householdId: string): Promise<void> {
       const id = householdId || DEFAULT_HOUSEHOLD_ID;
       await axiosInstance.delete(`/households/${id}/shopping-list/purchased`);
+    },
+
+    async transferToInventory(
+      householdId: string,
+      request?: TransferShoppingListRequestPayload
+    ): Promise<TransferShoppingListResponsePayload> {
+      const id = householdId || DEFAULT_HOUSEHOLD_ID;
+      const res = await axiosInstance.post<TransferShoppingListResponsePayload>(
+        `/households/${id}/shopping-list/transfer-to-inventory`,
+        request || {}
+      );
+      return res.data;
     },
   },
 

@@ -1,0 +1,35 @@
+{
+  "id": "QOL-05",
+  "title": "Interactive Household Switcher, Member Management & Invite Code Sharing",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": "2026-10-31T21:30:00Z",
+  "branch": "feat/QOL-05-household-switcher-and-invites",
+  "dependencies": [
+    "FIX-07"
+  ],
+  "allowed_paths": [
+    "src/Ediens.Api/Features/Households/**",
+    "src/ediens-web/src/App.tsx",
+    "src/ediens-web/src/components/ui/**",
+    "src/ediens-web/src/features/household/**",
+    "src/ediens-web/src/api/client.ts",
+    "src/Ediens.Tests/**"
+  ],
+  "deliverables": [
+    "src/Ediens.Api/Features/Households/HouseholdEndpoints.cs",
+    "src/Ediens.Api/Features/Households/HouseholdModels.cs",
+    "src/ediens-web/src/App.tsx",
+    "src/ediens-web/src/features/household/HouseholdModal.tsx",
+    "src/ediens-web/src/features/household/HouseholdSelector.tsx",
+    "src/ediens-web/src/api/client.ts"
+  ],
+  "acceptance_criteria": [
+    "Add backend endpoint POST /api/v1/households/join with inviteCode parameter that validates code and adds current user as a Member to the household.",
+    "Add backend endpoint GET /api/v1/households/{id}/members returning the list of members, their roles, and joined dates.",
+    "Remove hardcoded 'Поділ, вул. Спаська' and obsolete 'TASK-07' badge from App.tsx header.",
+    "Add interactive HouseholdSelector in navbar querying live GET /api/v1/households and displaying active household name, role, and member count.",
+    "Allow switching active household, persisting selection in app context/session, and dynamically refreshing inventory, recipes, and shopping list for the selected household.",
+    "Add HouseholdModal with invite code display, 1-click 'Скопіювати код запрошення' clipboard button, and 'Приєднатися до сім'ї за кодом' input."
+  ]
+}

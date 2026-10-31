@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ShoppingListItem, MeasurementUnit } from '../../types/api';
+import { ShoppingListItem, MeasurementUnit, StorageLocation } from '../../types/api';
 import { ediensApi, DEFAULT_HOUSEHOLD_ID, EdiensApiError, generateUuid } from '../../api/client';
 import { ShoppingItemRow } from './ShoppingItemRow';
+import { TransferReviewModal } from './TransferReviewModal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Card, CardContent } from '../../components/ui/Card';
@@ -13,6 +14,8 @@ import {
   Trash2,
   CheckCheck,
   Database,
+  PackageCheck,
+  X,
 } from 'lucide-react';
 
 export interface ShoppingListViewProps {
@@ -28,6 +31,16 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
   const [newQuantity, setNewQuantity] = useState('1');
   const [newUnit, setNewUnit] = useState<MeasurementUnit>('pcs');
   const [filterMode, setFilterMode] = useState<'all' | 'pending' | 'purchased'>('all');
+
+  const [justPurchasedItem, setJustPurchasedItem] = useState<{
+    id: string;
+    productName: string;
+    quantity: number;
+    unit: string;
+  } | null>(null);
+  const [isQuickTransferring, setIsQuickTransferring] = useState(false);
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [isTransferringBatch, setIsTransferringBatch] = useState(false);
 
   const loadItems = useCallback(async () => {
     setIsLoading(true);
@@ -114,6 +127,19 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
         ],
       });
       setItems(res);
+
+      if (updatedStatus) {
+        setJustPurchasedItem({
+          id: target.id,
+          productName: target.productName,
+          quantity: target.quantity,
+          unit: target.unit,
+        });
+      } else {
+        if (justPurchasedItem?.id === target.id) {
+          setJustPurchasedItem(null);
+        }
+      }
     } catch (err: unknown) {
       const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка оновлення статусу товару';
       onShowToast('Помилка', msg, 'error');
@@ -121,10 +147,77 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
     }
   };
 
+  const handleQuickTransfer = async (target: {
+    id: string;
+    productName: string;
+    quantity: number;
+    unit: string;
+  }) => {
+    setIsQuickTransferring(true);
+    try {
+      const res = await ediensApi.shoppingList.transferToInventory(DEFAULT_HOUSEHOLD_ID, {
+        items: [{ itemId: target.id }],
+      });
+      setJustPurchasedItem(null);
+      await loadItems();
+      const loc = res.transferredItems?.[0]?.location;
+      const locLabel = loc === 'Freezer' ? 'Морозилка' : loc === 'Pantry' ? 'Комора' : 'Холодильник';
+      onShowToast(
+        'Перенесено в інвентар',
+        `«${target.productName}» успішно додано до складу (${locLabel}).`,
+        'success'
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка перенесення в інвентар';
+      onShowToast('Помилка перенесення', msg, 'error');
+    } finally {
+      setIsQuickTransferring(false);
+    }
+  };
+
+  const handleConfirmBatchTransfer = async (
+    itemsToTransfer: Array<{
+      itemId: string;
+      location: StorageLocation;
+      expiresAt: string;
+      quantity: number;
+      unit: string;
+    }>
+  ) => {
+    setIsTransferringBatch(true);
+    try {
+      const res = await ediensApi.shoppingList.transferToInventory(DEFAULT_HOUSEHOLD_ID, {
+        items: itemsToTransfer.map((i) => ({
+          itemId: i.itemId,
+          location: i.location,
+          expiresAt: i.expiresAt,
+          quantity: i.quantity,
+          unit: i.unit,
+        })),
+      });
+      setIsReviewModalOpen(false);
+      setJustPurchasedItem(null);
+      await loadItems();
+      onShowToast(
+        'Успішно перенесено',
+        `Перенесено ${res.transferredCount} товарів в інвентар PostgreSQL.`,
+        'success'
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка перенесення товарів';
+      onShowToast('Помилка', msg, 'error');
+    } finally {
+      setIsTransferringBatch(false);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     try {
       await ediensApi.shoppingList.deleteItem(DEFAULT_HOUSEHOLD_ID, id);
       setItems((prev) => prev.filter((i) => i.id !== id));
+      if (justPurchasedItem?.id === id) {
+        setJustPurchasedItem(null);
+      }
       onShowToast('Товар видалено', 'Позицію видалено з бази даних PostgreSQL.', 'info');
     } catch (err: unknown) {
       const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка видалення';
@@ -137,6 +230,7 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
     try {
       await ediensApi.shoppingList.clearPurchased(DEFAULT_HOUSEHOLD_ID);
       setItems((prev) => prev.filter((i) => !i.isPurchased));
+      setJustPurchasedItem(null);
       onShowToast('Очищено', 'Всі придбані товари видалено з бази даних PostgreSQL.', 'info');
     } catch (err: unknown) {
       const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка очищення';
@@ -236,7 +330,7 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
       </Card>
 
       {/* Filter Tabs & Bulk Actions */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setFilterMode('all')}
@@ -271,17 +365,60 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
         </div>
 
         {purchasedCount > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={<Trash2 className="h-3.5 w-3.5 text-zinc-400" />}
-            onClick={handleClearPurchased}
-            className="text-xs text-zinc-400 hover:text-rose-400"
-          >
-            Очистити куплені
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="default"
+              size="sm"
+              icon={<PackageCheck className="h-3.5 w-3.5 text-zinc-950" />}
+              onClick={() => setIsReviewModalOpen(true)}
+              className="text-xs bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold shadow-sm"
+            >
+              Перенести куплені в інвентар ({purchasedCount})
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Trash2 className="h-3.5 w-3.5 text-zinc-400" />}
+              onClick={handleClearPurchased}
+              className="text-xs text-zinc-400 hover:text-rose-400"
+            >
+              Очистити куплені
+            </Button>
+          </div>
         )}
       </div>
+
+      {/* 1-Click Immediate Transfer Prompt Banner */}
+      {justPurchasedItem && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3.5 rounded-xl border border-emerald-500/40 bg-emerald-950/30 text-emerald-200 animate-fade-in gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-xs">
+              Товар <strong className="text-emerald-100">«{justPurchasedItem.productName}»</strong> щойно відмічено купленим! Бажаєте перенести на склад?
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="default"
+              size="sm"
+              loading={isQuickTransferring}
+              onClick={() => handleQuickTransfer(justPurchasedItem)}
+              className="text-xs bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold px-3 py-1 h-7"
+            >
+              Перенести в 1-клік
+            </Button>
+            <button
+              type="button"
+              onClick={() => setJustPurchasedItem(null)}
+              className="p-1 rounded text-zinc-400 hover:text-zinc-200"
+              aria-label="Закрити"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Shopping List Rows */}
       {filteredItems.length === 0 ? (
@@ -310,6 +447,16 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
           ))}
         </div>
       )}
+
+      {/* Bulk Review & Transfer Modal */}
+      <TransferReviewModal
+        isOpen={isReviewModalOpen}
+        onClose={() => setIsReviewModalOpen(false)}
+        items={items.filter((i) => i.isPurchased)}
+        onConfirm={handleConfirmBatchTransfer}
+        isSubmitting={isTransferringBatch}
+      />
     </div>
   );
 }
+
