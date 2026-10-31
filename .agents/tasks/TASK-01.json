@@ -1,9 +1,9 @@
 {
   "id": "TASK-01",
   "title": "SRS Core Specifications, Personas, and PostgreSQL Data Model",
-  "status": "TODO",
-  "assigned_to": null,
-  "updated_at": null,
+  "status": "IN_PROGRESS",
+  "assigned_to": "Maxs-MacBook-Air",
+  "updated_at": "2026-10-31T07:52:40Z",
   "branch": "docs/TASK-01-srs-core-and-data-model",
   "dependencies": [],
   "allowed_paths": [
