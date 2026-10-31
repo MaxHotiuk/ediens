@@ -1,9 +1,9 @@
 {
   "id": "TASK-02",
   "title": "System Architecture, Distributed Concurrency Patterns, and NFRs",
-  "status": "TODO",
-  "assigned_to": null,
-  "updated_at": null,
+  "status": "IN_PROGRESS",
+  "assigned_to": "voyager-ASUS",
+  "updated_at": "2026-10-31T07:56:13Z",
   "branch": "docs/TASK-02-architecture-concurrency-nfrs",
   "dependencies": [],
   "allowed_paths": [
