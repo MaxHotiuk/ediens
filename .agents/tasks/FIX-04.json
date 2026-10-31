@@ -1,9 +1,9 @@
 {
   "id": "FIX-04",
   "title": "End-to-End Fix: Meals, Macros & Smart Recipes Slices (Backend + Frontend)",
-  "status": "IN_PROGRESS",
+  "status": "DONE",
   "assigned_to": "Maxs-MacBook-Air",
-  "updated_at": "2026-10-31T10:08:03Z",
+  "updated_at": "2026-10-31T10:13:50Z",
   "branch": "fix/FIX-04-e2e-macros-and-recipes",
   "dependencies": [
     "FIX-01",

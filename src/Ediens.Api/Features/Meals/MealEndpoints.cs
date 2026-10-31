@@ -199,6 +199,88 @@ public static class MealEndpoints
         .WithName("LogMealIntake")
         .WithSummary("Залогувати прийом їжі у щоденник харчування");
 
+        group.MapGet("", async (
+            Guid? userId,
+            string? date,
+            HttpContext context,
+            EdiensDbContext db,
+            CancellationToken ct) =>
+        {
+            var effectiveUserId = userId ?? UserContext.GetCurrentUserId(context);
+
+            var query = db.MealLogs
+                .Include(m => m.Items)
+                .ThenInclude(i => i.Product)
+                .Where(m => m.UserId == effectiveUserId);
+
+            if (!string.IsNullOrWhiteSpace(date) && DateOnly.TryParse(date, out var parsedDate))
+            {
+                var dayStart = parsedDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+                var dayEnd = dayStart.AddDays(1);
+                query = query.Where(m => m.LoggedAt >= dayStart && m.LoggedAt < dayEnd);
+            }
+
+            var mealLogs = await query
+                .OrderByDescending(m => m.LoggedAt)
+                .ToListAsync(ct);
+
+            var dtos = mealLogs.Select(m => new MealLogDetailDto(
+                Id: m.Id,
+                UserId: m.UserId,
+                MealType: m.MealType,
+                LoggedAt: m.LoggedAt,
+                Calories: m.Calories,
+                Protein: m.Protein,
+                Fat: m.Fat,
+                Carbs: m.Carbs,
+                IdempotencyKey: m.IdempotencyKey,
+                Items: m.Items.Select(i => new MealLogItemDto(
+                    Id: i.Id,
+                    ProductId: i.ProductId,
+                    ProductName: i.Product?.Name ?? "Продукт",
+                    Quantity: i.Quantity,
+                    Unit: i.Unit,
+                    Calories: i.Calories,
+                    Protein: i.Protein,
+                    Fat: i.Fat,
+                    Carbs: i.Carbs
+                )).ToList()
+            )).ToList();
+
+            return Results.Ok(new MealLogListResponse(dtos));
+        })
+        .WithName("GetMealLogs")
+        .WithSummary("Отримати історію прийомів їжі користувача");
+
+        group.MapDelete("/{id:guid}", async (
+            Guid id,
+            HttpContext context,
+            EdiensDbContext db,
+            CancellationToken ct) =>
+        {
+            var effectiveUserId = UserContext.GetCurrentUserId(context);
+
+            var mealLog = await db.MealLogs
+                .Include(m => m.Items)
+                .FirstOrDefaultAsync(m => m.Id == id && m.UserId == effectiveUserId, ct);
+
+            if (mealLog == null)
+            {
+                return EdiensResults.NotFound(
+                    context.Request.Path,
+                    $"Meal log with ID '{id}' was not found.",
+                    resourceType: "MealLog",
+                    resourceId: id.ToString());
+            }
+
+            db.MealLogs.Remove(mealLog);
+            await db.SaveChangesAsync(ct);
+
+            return Results.NoContent();
+        })
+        .WithName("DeleteMealLog")
+        .WithSummary("Видалити запис прийому їжі");
+
         return endpoints;
     }
 }
