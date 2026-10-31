@@ -1,8 +1,1953 @@
-# OpenAPI 3.1 Specification for ēdiens API
-# Scheduled for implementation in TASK-03
 openapi: 3.1.0
 info:
-  title: ēdiens API
+  title: ēdiens Core Web API
   version: 1.0.0
-  description: Specification skeleton. Full schema and endpoints are implemented in TASK-03.
-paths: {}
+  description: |
+    ### Єдиний хаб для управління запасами продуктів, підрахунку макросів та рекомендацій рецептів.
+    
+    Специфікація REST API системи **ēdiens** розроблена з дотриманням принципів:
+    - **FEFO (First Expired, First Out):** Автоматична пріоритизація партій продуктів із найближчим терміном придатності.
+    - **Строга консистентність та невід'ємні залишки:** Оптимістичне блокування (OCC) за допомогою заголовків `ETag` / `If-Match` на основі PostgreSQL системного стовпця `xmin`.
+    - **Ідемпотентність операцій:** Захист від повторних списань та дублювання логів прийому їжі за допомогою заголовка `Idempotency-Key`.
+    - **Стандартизована обробка помилок:** Повна відповідність специфікації **RFC 9457 Problem Details for HTTP APIs** з типізованими кодами помилок `errorCode` та контекстними розширеннями.
+    - **W3C Distributed Tracing:** Наскрізне трасування запитів через заголовок `traceparent`.
+  contact:
+    name: ēdiens Engineering Team
+    email: dev@ediens.app
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Локальне середовище розробки (Docker Compose / Kestrel)
+  - url: https://api.ediens.app/api/v1
+    description: Промисловий сервер (Production)
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ---------------------------------------------------------------------------
+  # 1. POST /inventory/items — Додавання нової партії продукту (FR-01, FEFO)
+  # ---------------------------------------------------------------------------
+  /inventory/items:
+    post:
+      operationId: addInventoryItem
+      summary: Додати партію продукту в інвентар домогосподарства
+      description: |
+        Реєструє нову партію продукту (batch) в інвентарі домогосподарства із зазначенням локації 
+        (`Fridge`, `Freezer`, `Pantry`), кількості, одиниці виміру та терміну придатності `expiresAt`.
+      tags:
+        - Inventory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInventoryItemRequest'
+            examples:
+              freshMilk:
+                summary: Додавання партії молока у холодильник
+                value:
+                  householdId: 0192e2b0-8812-7001-9011-aa9988776655
+                  productId: 0192e2b1-0000-7000-8000-000000000001
+                  productName: "Молоко 'Селянське' 2.5%"
+                  location: Fridge
+                  quantity: 1000.0
+                  unit: ml
+                  expiresAt: "2026-11-08T00:00:00Z"
+                  openedAt: null
+      responses:
+        '201':
+          description: Партію успішно додано до інвентарю.
+          headers:
+            ETag:
+              description: Слабкий ETag версії створеного запису на основі PostgreSQL xmin.
+              schema:
+                type: string
+                example: 'W/"10423"'
+            Location:
+              description: Посилання на створений ресурс партії.
+              schema:
+                type: string
+                example: /api/v1/inventory/items/0192e2b3-5730-7432-8411-cf0b91d23456
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryItemResponse'
+              examples:
+                createdItem:
+                  summary: Успішно створена партія
+                  value:
+                    id: 0192e2b3-5730-7432-8411-cf0b91d23456
+                    householdId: 0192e2b0-8812-7001-9011-aa9988776655
+                    productId: 0192e2b1-0000-7000-8000-000000000001
+                    productName: "Молоко 'Селянське' 2.5%"
+                    location: Fridge
+                    quantity: 1000.0
+                    unit: ml
+                    expiresAt: "2026-11-08T00:00:00Z"
+                    openedAt: null
+                    etag: 'W/"10423"'
+                    freshnessStatus: FRESH
+                    daysUntilExpiration: 8
+                    createdAt: "2026-10-31T08:10:00Z"
+        '400':
+          $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+
+    # -------------------------------------------------------------------------
+    # 2. GET /inventory/items — Отримання списку запасів із FEFO-сортуванням
+    # -------------------------------------------------------------------------
+    get:
+      operationId: getInventoryItems
+      summary: Отримати список запасів домогосподарства
+      description: |
+        Повертає партії продуктів із фільтрацією за локацією (`Fridge`, `Freezer`, `Pantry`) 
+        та автоматичним сортуванням за принципом **FEFO** (`expiresAt ASC`).
+      tags:
+        - Inventory
+      parameters:
+        - name: householdId
+          in: query
+          required: true
+          description: Унікальний ідентифікатор домогосподарства (UUIDv7).
+          schema:
+            type: string
+            format: uuid
+            example: 0192e2b0-8812-7001-9011-aa9988776655
+        - name: location
+          in: query
+          required: false
+          description: Фільтр за місцем зберігання.
+          schema:
+            $ref: '#/components/schemas/StorageLocation'
+        - name: status
+          in: query
+          required: false
+          description: Фільтр за статусом свіжості продукту.
+          schema:
+            $ref: '#/components/schemas/FreshnessStatus'
+      responses:
+        '200':
+          description: Список партій успішно отримано та відсортовано за FEFO.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryItemListResponse'
+              examples:
+                inventoryList:
+                  summary: Перелік запасів у холодильнику
+                  value:
+                    householdId: 0192e2b0-8812-7001-9011-aa9988776655
+                    totalCount: 2
+                    items:
+                      - id: 0192e2b3-5730-7432-8411-cf0b91d23456
+                        householdId: 0192e2b0-8812-7001-9011-aa9988776655
+                        productId: 0192e2b1-0000-7000-8000-000000000001
+                        productName: "Молоко 'Селянське' 2.5%"
+                        location: Fridge
+                        quantity: 600.0
+                        unit: ml
+                        expiresAt: "2026-11-02T00:00:00Z"
+                        openedAt: "2026-10-30T10:00:00Z"
+                        etag: 'W/"10425"'
+                        freshnessStatus: EXPIRING_SOON
+                        daysUntilExpiration: 2
+                        createdAt: "2026-10-28T09:00:00Z"
+                      - id: 0192e2b3-9999-7432-8411-cf0b91d29999
+                        householdId: 0192e2b0-8812-7001-9011-aa9988776655
+                        productId: 0192e2b1-0000-7000-8000-000000000002
+                        productName: "Куряче філе охолоджене"
+                        location: Fridge
+                        quantity: 500.0
+                        unit: g
+                        expiresAt: "2026-11-05T00:00:00Z"
+                        openedAt: null
+                        etag: 'W/"10410"'
+                        freshnessStatus: FRESH
+                        daysUntilExpiration: 5
+                        createdAt: "2026-10-30T14:30:00Z"
+        '400':
+          $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+
+  # ---------------------------------------------------------------------------
+  # 3. PATCH /inventory/items/{id} — Оновлення або споживання частини партії
+  # ---------------------------------------------------------------------------
+  /inventory/items/{id}:
+    patch:
+      operationId: updateInventoryItemQuantity
+      summary: Змінити кількість або списати частину партії (з перевіркою If-Match)
+      description: |
+        Змінює залишок партії або позначає частину як спожиту.
+        
+        **Обов'язкова умова консистентності:** Клієнт зобов'язаний надати заголовок `If-Match: W/"<ETag>"`. 
+        Якщо версія запису на сервері змінилася іншим учасником домогосподарства, 
+        ендпоінт повертає `409 Conflict` з типом `CONCURRENT_MODIFICATION` та актуальним залишком.
+      tags:
+        - Inventory
+      parameters:
+        - $ref: '#/components/parameters/InventoryItemIdPath'
+        - $ref: '#/components/parameters/IfMatchHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateInventoryItemQuantityRequest'
+            examples:
+              consumeMilk:
+                summary: Списання 400 мл молока
+                value:
+                  quantityDelta: -400.0
+                  markOpened: true
+      responses:
+        '200':
+          description: Залишок партії успішно оновлено.
+          headers:
+            ETag:
+              description: Новий ETag після мутації.
+              schema:
+                type: string
+                example: 'W/"10425"'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryItemResponse'
+              examples:
+                updatedItem:
+                  summary: Оновлений залишок партії
+                  value:
+                    id: 0192e2b3-5730-7432-8411-cf0b91d23456
+                    householdId: 0192e2b0-8812-7001-9011-aa9988776655
+                    productId: 0192e2b1-0000-7000-8000-000000000001
+                    productName: "Молоко 'Селянське' 2.5%"
+                    location: Fridge
+                    quantity: 600.0
+                    unit: ml
+                    expiresAt: "2026-11-08T00:00:00Z"
+                    openedAt: "2026-10-31T08:15:00Z"
+                    etag: 'W/"10425"'
+                    freshnessStatus: FRESH
+                    daysUntilExpiration: 8
+                    createdAt: "2026-10-31T08:10:00Z"
+        '400':
+          $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+        '404':
+          $ref: '#/components/responses/404ItemNotFound'
+        '409':
+          $ref: '#/components/responses/409ConcurrentModification'
+        '422':
+          $ref: '#/components/responses/422InsufficientInventory'
+
+    # -------------------------------------------------------------------------
+    # 4. DELETE /inventory/items/{id} — Видалення партії продукту
+    # -------------------------------------------------------------------------
+    delete:
+      operationId: deleteInventoryItem
+      summary: Видалити партію продукту (зіпсована або помилково внесена)
+      description: |
+        Видаляє вказану партію з обліку. Якщо товар зіпсовано, система реєструє подію 
+        в аналітиці харчових відходів (Food Waste Analytics) через Transactional Outbox.
+      tags:
+        - Inventory
+      parameters:
+        - $ref: '#/components/parameters/InventoryItemIdPath'
+        - name: reason
+          in: query
+          required: false
+          description: Причина видалення партії.
+          schema:
+            type: string
+            enum: [SPOILED, CONSUMED_UNTRACKED, ENTERED_IN_ERROR]
+            default: SPOILED
+            example: SPOILED
+      responses:
+        '204':
+          description: Партію успішно видалено. Тіло відповіді відсутнє.
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+        '404':
+          $ref: '#/components/responses/404ItemNotFound'
+
+  # ---------------------------------------------------------------------------
+  # 5. POST /meals/log — Логування прийому їжі (FR-05)
+  # ---------------------------------------------------------------------------
+  /meals/log:
+    post:
+      operationId: logMealIntake
+      summary: Залогувати прийом їжі у щоденник харчування
+      description: |
+        Додає запис про вживання їжі із зазначенням типу прийому (`Breakfast`, `Lunch`, `Dinner`, `Snack`), 
+        списку продуктів та їхньої ваги. Підтримує заголовок `Idempotency-Key` для захисту від дублювання логів при мережевих повторах.
+      tags:
+        - Nutrition
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMealLogRequest'
+            examples:
+              breakfastOatmeal:
+                summary: Логування сніданку
+                value:
+                  mealType: Breakfast
+                  loggedAt: "2026-10-31T08:30:00Z"
+                  items:
+                    - productId: 0192e2b1-0000-7000-8000-000000000001
+                      productName: "Молоко 'Селянське' 2.5%"
+                      quantity: 200.0
+                      unit: ml
+                    - productId: 0192e2b1-0000-7000-8000-000000000005
+                      productName: "Вівсяні пластівці 'Ніжні'"
+                      quantity: 60.0
+                      unit: g
+      responses:
+        '201':
+          description: Прийом їжі успішно залоговано. Повертає сумарні КБЖВ.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MealLogResponse'
+              examples:
+                mealLogResult:
+                  summary: Розраховані макроси сніданку
+                  value:
+                    id: 0192e2ba-4455-7001-8123-aa1122334455
+                    userId: 0192e2b0-1111-7000-8000-000000000001
+                    mealType: Breakfast
+                    loggedAt: "2026-10-31T08:30:00Z"
+                    calories: 342.0
+                    protein: 14.8
+                    fat: 8.2
+                    carbs: 52.4
+                    itemsCount: 2
+                    remainingBudgetToday:
+                      calories: 1858.0
+                      protein: 145.2
+                      fat: 56.8
+                      carbs: 187.6
+        '400':
+          $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '409':
+          $ref: '#/components/responses/409IdempotencyConflict'
+
+  # ---------------------------------------------------------------------------
+  # 6. PUT /nutrition/targets — Встановлення добових цілей КБЖВ (FR-04)
+  # ---------------------------------------------------------------------------
+  /nutrition/targets:
+    put:
+      operationId: setNutritionTargets
+      summary: Встановити або оновити цільовий профіль КБЖВ користувача
+      description: |
+        Задає щоденну норму споживання калорій, білків, жирів та вуглеводів. 
+        Ці параметри використовуються для розрахунку залишку макро-бюджету та ранжування рекомендованих страв.
+      tags:
+        - Nutrition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetNutritionTargetsRequest'
+            examples:
+              highProteinProfile:
+                summary: Профіль Meal Prepper Олега
+                value:
+                  targetCalories: 2200.0
+                  targetProtein: 160.0
+                  targetFat: 65.0
+                  targetCarbs: 240.0
+                  effectiveFrom: "2026-10-31"
+      responses:
+        '200':
+          description: Добові цілі успішно збережено.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NutritionTargetsResponse'
+              examples:
+                savedTargets:
+                  summary: Збережені цілі КБЖВ
+                  value:
+                    id: 0192e2bb-8899-7002-9900-ccddeeff1122
+                    userId: 0192e2b0-1111-7000-8000-000000000001
+                    targetCalories: 2200.0
+                    targetProtein: 160.0
+                    targetFat: 65.0
+                    targetCarbs: 240.0
+                    effectiveFrom: "2026-10-31"
+                    updatedAt: "2026-10-31T08:35:00Z"
+        '400':
+          $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+
+  # ---------------------------------------------------------------------------
+  # 7. GET /recipes/recommendations — Рекомендації рецептів (FR-07)
+  # ---------------------------------------------------------------------------
+  /recipes/recommendations:
+    get:
+      operationId: getRecipeRecommendations
+      summary: Отримати рекомендації страв на основі FEFO-запасів та залишку макросів
+      description: |
+        Обчислює оптимальні рецепти за формулою скорингу:
+        $$\text{Score} = w_1 \cdot \text{ExpiringStockMatch} + w_2 \cdot \text{MacroBudgetFit} - w_3 \cdot \text{MissingIngredientsCount}$$
+        Перевага надається стравам, які допомагають утилізувати продукти, термін придатності яких збігає, 
+        та ідеально доповнюють невикористаний макро-бюджет користувача на сьогодні.
+      tags:
+        - Recipes
+      parameters:
+        - name: householdId
+          in: query
+          required: true
+          description: Ідентифікатор домогосподарства для аудиту наявних запасів.
+          schema:
+            type: string
+            format: uuid
+            example: 0192e2b0-8812-7001-9011-aa9988776655
+        - name: maxPrepTimeMinutes
+          in: query
+          required: false
+          description: Максимальний час приготування у хвилинах.
+          schema:
+            type: integer
+            minimum: 5
+            maximum: 240
+            example: 30
+        - name: limit
+          in: query
+          required: false
+          description: Кількість рекомендованих рецептів.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Список рекомендованих страв з розрахованим скорингом та статусом інгредієнтів.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecipeRecommendationListResponse'
+              examples:
+                topRecommendations:
+                  summary: Топ рекомендована страва для Олега
+                  value:
+                    householdId: 0192e2b0-8812-7001-9011-aa9988776655
+                    generatedAt: "2026-10-31T08:40:00Z"
+                    recommendations:
+                      - recipeId: 0192e2b8-1234-7111-9988-bbccddeeff00
+                        title: "Куряче філе з гречкою та шпинатом"
+                        description: "Високобілкова вечеря зі свіжим шпинатом та філе."
+                        prepTimeMinutes: 25
+                        calories: 520.0
+                        protein: 58.0
+                        fat: 8.5
+                        carbs: 48.0
+                        matchScore: 94.5
+                        expiringIngredientsCount: 2
+                        missingIngredientsCount: 0
+                        canCookImmediately: true
+        '400':
+          $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+        '429':
+          $ref: '#/components/responses/429RateLimitExceeded'
+
+  # ---------------------------------------------------------------------------
+  # 8. POST /recipes/{id}/cook — Транзакційний 1-Click Cook (FR-08)
+  # ---------------------------------------------------------------------------
+  /recipes/{id}/cook:
+    post:
+      operationId: cookRecipe
+      summary: Атомарне приготування страви (списання за FEFO + логування макросів)
+      description: |
+        Виконує атомарну операцію приготування страви в межах однієї транзакції БД:
+        1. Списує необхідну вагу інгредієнтів із найстаріших партій інвентарю за принципом **FEFO**.
+        2. Додає запис у щоденник прийомів їжі користувача (`MealLog`).
+        
+        Якщо продуктів недостатньо, транзакція відкочується з помилкою `422 Unprocessable Content` 
+        (`INSUFFICIENT_INVENTORY`), де деталізовано дефіцит інгредієнтів.
+      tags:
+        - Recipes
+      parameters:
+        - $ref: '#/components/parameters/RecipeIdPath'
+        - $ref: '#/components/parameters/IdempotencyKeyHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CookRecipeRequest'
+            examples:
+              cookDinner:
+                summary: Приготування страви на 1 порцію
+                value:
+                  householdId: 0192e2b0-8812-7001-9011-aa9988776655
+                  servings: 1
+                  mealType: Dinner
+      responses:
+        '200':
+          description: Страву успішно приготовано, інгредієнти списано, макроси залоговано.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CookRecipeResponse'
+              examples:
+                cookedSuccess:
+                  summary: Результат виконання 1-Click Cook
+                  value:
+                    recipeId: 0192e2b8-1234-7111-9988-bbccddeeff00
+                    mealLogId: 0192e2bc-9900-7111-8822-eeddccbbaa11
+                    servingsCooked: 1
+                    deductedBatches:
+                      - batchId: 0192e2b3-9999-7432-8411-cf0b91d29999
+                        productName: "Куряче філе охолоджене"
+                        deductedQuantity: 200.0
+                        remainingQuantity: 300.0
+                        unit: g
+                      - batchId: 0192e2b3-5555-7432-8411-cf0b91d25555
+                        productName: "Шпинат свіжий 'Верес'"
+                        deductedQuantity: 50.0
+                        remainingQuantity: 0.0
+                        unit: g
+                    loggedMacros:
+                      calories: 520.0
+                      protein: 58.0
+                      fat: 8.5
+                      carbs: 48.0
+        '400':
+          $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+        '404':
+          $ref: '#/components/responses/404ItemNotFound'
+        '409':
+          $ref: '#/components/responses/409IdempotencyConflict'
+        '422':
+          $ref: '#/components/responses/422InsufficientInventory'
+
+  # ---------------------------------------------------------------------------
+  # 9. GET /products/barcode/{code} — Пошук товару за штрих-кодом (FR-03)
+  # ---------------------------------------------------------------------------
+  /products/barcode/{code}:
+    get:
+      operationId: getProductByBarcode
+      summary: Пошук назви та КБЖВ продукту за штрих-кодом EAN-13
+      description: |
+        Повертає харчову цінність на 100г за штрих-кодом.
+        
+        Використовує **.NET 10 HybridCache** із захистом від Singleflight-шторму запитів. 
+        Якщо запис відсутній у локальній базі, звертається до зовнішнього каталогу (Open Food Facts) 
+        через контур стійкості **Circuit Breaker** (Polly).
+      tags:
+        - Products
+      parameters:
+        - name: code
+          in: path
+          required: true
+          description: Штрих-код стандарту EAN-13 або EAN-8 (лише цифри).
+          schema:
+            type: string
+            pattern: '^\d{8,13}$'
+            example: "4820000112233"
+      responses:
+        '200':
+          description: Інформацію про продукт успішно знайдено.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductBarcodeDetailsResponse'
+              examples:
+                cottageCheese:
+                  summary: Сир кисломолочний 5%
+                  value:
+                    barcode: "4820000112233"
+                    name: "Сир кисломолочний 5%"
+                    brand: "Яготинське"
+                    caloriesPer100g: 121.0
+                    proteinPer100g: 17.0
+                    fatPer100g: 5.0
+                    carbsPer100g: 2.0
+                    dataSource: "OpenFoodFacts"
+                    isCached: true
+        '400':
+          $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '404':
+          $ref: '#/components/responses/404ItemNotFound'
+        '429':
+          $ref: '#/components/responses/429RateLimitExceeded'
+        '503':
+          $ref: '#/components/responses/503ExternalServiceUnavailable'
+
+  # ---------------------------------------------------------------------------
+  # 10. POST /households/{id}/shopping-list/sync — Офлайн-синхронізація (FR-10, FR-12)
+  # ---------------------------------------------------------------------------
+  /households/{id}/shopping-list/sync:
+    post:
+      operationId: syncShoppingList
+      summary: Синхронізувати та злити зміни спільного списку покупок домогосподарства
+      description: |
+        Підтримує патерн **Offline-First**: клієнт надсилає локальні зміни 
+        (позначені як куплені, змінені або додані в супермаркеті без мережі). 
+        Сервер безконфліктно зливає стан на основі часових міток `updatedAt` і повертає актуальний стан списку.
+      tags:
+        - ShoppingList
+      parameters:
+        - $ref: '#/components/parameters/HouseholdIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShoppingListSyncRequest'
+            examples:
+              syncChanges:
+                summary: Синхронізація куплених позицій
+                value:
+                  lastSyncTimestamp: "2026-10-31T08:00:00Z"
+                  clientChanges:
+                    - id: 0192e2bd-1100-7432-8000-001122334455
+                      productName: "Вівсяні пластівці"
+                      quantity: 1.0
+                      unit: pcs
+                      isPurchased: true
+                      clientUpdatedAt: "2026-10-31T08:42:10Z"
+      responses:
+        '200':
+          description: Список покупок успішно синхронізовано та об'єднано.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingListSyncResponse'
+              examples:
+                syncSuccess:
+                  summary: Оновлений список після злиття
+                  value:
+                    householdId: 0192e2b0-8812-7001-9011-aa9988776655
+                    serverTimestamp: "2026-10-31T08:45:00Z"
+                    items:
+                      - id: 0192e2bd-1100-7432-8000-001122334455
+                        productName: "Вівсяні пластівці"
+                        quantity: 1.0
+                        unit: pcs
+                        isPurchased: true
+                        updatedAt: "2026-10-31T08:42:10Z"
+                      - id: 0192e2bd-2200-7432-8000-001122334466
+                        productName: "Куряче філе"
+                        quantity: 500.0
+                        unit: g
+                        isPurchased: false
+                        updatedAt: "2026-10-31T08:15:00Z"
+        '400':
+          $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+
+# =============================================================================
+# COMPONENTS: Parameters, Headers, Schemas, and Error Responses
+# =============================================================================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Введіть валідний JWT токен аутентифікації у форматі `Bearer <token>`.
+
+  parameters:
+    InventoryItemIdPath:
+      name: id
+      in: path
+      required: true
+      description: Унікальний ідентифікатор партії в інвентарі (UUIDv7).
+      schema:
+        type: string
+        format: uuid
+        example: 0192e2b3-5730-7432-8411-cf0b91d23456
+
+    HouseholdIdPath:
+      name: id
+      in: path
+      required: true
+      description: Унікальний ідентифікатор домогосподарства (UUIDv7).
+      schema:
+        type: string
+        format: uuid
+        example: 0192e2b0-8812-7001-9011-aa9988776655
+
+    RecipeIdPath:
+      name: id
+      in: path
+      required: true
+      description: Унікальний ідентифікатор рецепта (UUIDv7).
+      schema:
+        type: string
+        format: uuid
+        example: 0192e2b8-1234-7111-9988-bbccddeeff00
+
+    IfMatchHeader:
+      name: If-Match
+      in: header
+      required: true
+      description: Обов'язковий слабкий ETag для контролю оптимістичного блокування на базі PostgreSQL xmin.
+      schema:
+        type: string
+        example: 'W/"10423"'
+
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Унікальний UUIDv7 ключ клієнта для гарантії безпечного повторення запиту без дублювання мутацій.
+      schema:
+        type: string
+        format: uuid
+        example: 0192e2b9-1122-7f30-8111-cc0099887766
+
+  responses:
+    # -------------------------------------------------------------------------
+    # RFC 9457 ERROR RESPONSES
+    # -------------------------------------------------------------------------
+    400ValidationError:
+      description: Невалідні вхідні дані запиту (RFC 9457 Validation Error).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ValidationProblemDetails'
+          examples:
+            validationFailed:
+              summary: Помилка валідації полів
+              value:
+                type: "https://ediens.app/errors/validation-failed"
+                title: "One or more validation errors occurred."
+                status: 400
+                detail: "The request payload failed input validation rules. Please correct the specified fields."
+                instance: "/api/v1/inventory/items"
+                errorCode: "VALIDATION_FAILED"
+                traceId: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+                timestamp: "2026-10-31T08:05:00.120Z"
+                extensions:
+                  errors:
+                    quantity:
+                      - "Quantity must be greater than 0."
+                    unit:
+                      - "Unit 'kilogram' is invalid. Permitted units: 'g', 'ml', 'pcs'."
+                  invalidParams:
+                    - name: "quantity"
+                      reason: "Must be greater than 0"
+                      value: -150
+                    - name: "unit"
+                      reason: "Must match enum [g, ml, pcs]"
+                      value: "kilogram"
+
+    401Unauthorized:
+      description: Відсутня або недійсна автентифікація JWT (RFC 9457).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/UnauthorizedProblemDetails'
+          examples:
+            tokenExpired:
+              summary: Прострочений токен доступу
+              value:
+                type: "https://ediens.app/errors/unauthorized-access"
+                title: "Authentication token is missing, expired, or invalid."
+                status: 401
+                detail: "Your access token expired at 2026-10-31T07:55:00Z. Please refresh your session."
+                instance: "/api/v1/nutrition/targets"
+                errorCode: "UNAUTHORIZED_ACCESS"
+                traceId: "00-2d88c4591a293bf6114a821e901455bb-00c8121f1ba48099-01"
+                timestamp: "2026-10-31T08:05:10.450Z"
+                extensions:
+                  tokenExpiredAt: "2026-10-31T07:55:00Z"
+                  canRefresh: true
+
+    403HouseholdAccessDenied:
+      description: Доступ до домогосподарства заборонено (Tenant Scoping Violation).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/HouseholdAccessDeniedProblemDetails'
+          examples:
+            notAMember:
+              summary: Спроба доступу до чужого домогосподарства
+              value:
+                type: "https://ediens.app/errors/household-access-denied"
+                title: "Access to household resources denied."
+                status: 403
+                detail: "The authenticated user is not a registered member of household '0192e2b0-8812-7001-9011-aa9988776655'."
+                instance: "/api/v1/inventory/items?householdId=0192e2b0-8812-7001-9011-aa9988776655"
+                errorCode: "HOUSEHOLD_ACCESS_DENIED"
+                traceId: "00-51a87b3287114400aa89711566442200-0011223344556677-01"
+                timestamp: "2026-10-31T08:05:25.890Z"
+                extensions:
+                  householdId: "0192e2b0-8812-7001-9011-aa9988776655"
+                  requiredRole: "Member"
+                  currentMembershipStatus: "NOT_A_MEMBER"
+
+    404ItemNotFound:
+      description: Запитуваний ресурс не знайдено або вже видалено (RFC 9457).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ItemNotFoundProblemDetails'
+          examples:
+            batchNotFound:
+              summary: Партію продукту не знайдено
+              value:
+                type: "https://ediens.app/errors/item-not-found"
+                title: "Resource does not exist or was deleted."
+                status: 404
+                detail: "Inventory batch '0192e2b3-5730-7432-8411-cf0b91d23456' could not be found in active household inventory."
+                instance: "/api/v1/inventory/items/0192e2b3-5730-7432-8411-cf0b91d23456"
+                errorCode: "ITEM_NOT_FOUND"
+                traceId: "00-8899aabbccddeeff0011223344556677-1122334455667788-01"
+                timestamp: "2026-10-31T08:05:40.012Z"
+                extensions:
+                  resourceType: "InventoryBatch"
+                  resourceId: "0192e2b3-5730-7432-8411-cf0b91d23456"
+
+    409ConcurrentModification:
+      description: Колізія оптимістичного блокування при паралельній зміні ресурсу (RFC 9457).
+      headers:
+        ETag:
+          description: Актуальний слабкий ETag на сервері.
+          schema:
+            type: string
+            example: 'W/"10425"'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ConcurrentModificationProblemDetails'
+          examples:
+            etagMismatch:
+              summary: Порушення If-Match версії партії
+              value:
+                type: "https://ediens.app/errors/concurrent-modification"
+                title: "Conflict during state modification"
+                status: 409
+                detail: "The inventory item has been modified by another household member since you loaded it."
+                instance: "/api/v1/inventory/items/0192e2b3-5730-7432-8411-cf0b91d23456"
+                errorCode: "CONCURRENT_MODIFICATION"
+                traceId: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+                timestamp: "2026-10-31T08:06:00.670Z"
+                extensions:
+                  currentETag: 'W/"10425"'
+                  clientExpectedETag: 'W/"10423"'
+                  currentQuantity: 600.0
+                  unit: "ml"
+                  productName: "Молоко 'Селянське' 2.5%"
+                  lastModifiedBy: "Anna"
+                  lastModifiedAt: "2026-10-31T08:05:58.210Z"
+
+    409IdempotencyConflict:
+      description: Запит із таким Idempotency-Key уже перебуває в процесі обробки.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/IdempotencyConflictProblemDetails'
+          examples:
+            inFlightRequest:
+              summary: Одночасний ідемпотентний запит
+              value:
+                type: "https://ediens.app/errors/idempotency-conflict"
+                title: "Concurrent idempotent request already in progress."
+                status: 409
+                detail: "An identical request with Idempotency-Key '0192e2b9-1122-7f30-8111-cc0099887766' is currently being processed by the server."
+                instance: "/api/v1/recipes/0192e2b8-1234-7111-9988-bbccddeeff00/cook"
+                errorCode: "IDEMPOTENCY_CONFLICT"
+                traceId: "00-778899aabbccddeeff00112233445566-2233445566778899-01"
+                timestamp: "2026-10-31T08:06:15.340Z"
+                extensions:
+                  idempotencyKey: "0192e2b9-1122-7f30-8111-cc0099887766"
+                  state: "IN_FLIGHT"
+                  lockExpiresInMs: 2400
+
+    422InsufficientInventory:
+      description: Недостатній залишок продуктів для виконання операції списання або приготування (RFC 9457).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/InsufficientInventoryProblemDetails'
+          examples:
+            shortfallCook:
+              summary: Нестача інгредієнтів для 1-Click Cook
+              value:
+                type: "https://ediens.app/errors/insufficient-inventory"
+                title: "Inventory stock insufficient to complete requested action."
+                status: 422
+                detail: "Cannot cook recipe 'Куряче філе з гречкою та шпинатом' for 2 servings: missing 150g chicken breast and 50g spinach."
+                instance: "/api/v1/recipes/0192e2b8-1234-7111-9988-bbccddeeff00/cook"
+                errorCode: "INSUFFICIENT_INVENTORY"
+                traceId: "00-3344556677889900aabbccddeeff0011-44556677889900aa-01"
+                timestamp: "2026-10-31T08:06:30.980Z"
+                extensions:
+                  recipeId: "0192e2b8-1234-7111-9988-bbccddeeff00"
+                  requestedServings: 2
+                  missingIngredients:
+                    - productId: "0192e2b1-0000-7000-8000-000000000002"
+                      productName: "Куряче філе охолоджене"
+                      requiredQuantity: 400.0
+                      availableQuantity: 250.0
+                      unit: "g"
+                      shortfall: 150.0
+                    - productId: "0192e2b1-0000-7000-8000-000000000007"
+                      productName: "Шпинат свіжий 'Верес'"
+                      requiredQuantity: 100.0
+                      availableQuantity: 50.0
+                      unit: "g"
+                      shortfall: 50.0
+
+    429RateLimitExceeded:
+      description: Перевищено допустиму частоту запитів (Sliding Window Rate Limiter).
+      headers:
+        Retry-After:
+          description: Кількість секунд, яку клієнту слід зачекати перед наступним запитом.
+          schema:
+            type: integer
+            example: 30
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/RateLimitExceededProblemDetails'
+          examples:
+            barcodeQuota:
+              summary: Вичерпано ліміт сканувань штрих-кодів
+              value:
+                type: "https://ediens.app/errors/rate-limit-exceeded"
+                title: "Too Many Requests"
+                status: 429
+                detail: "Rate limit quota exceeded for barcode scanning. Please wait 30 seconds before sending further requests."
+                instance: "/api/v1/products/barcode/4820000112233"
+                errorCode: "RATE_LIMIT_EXCEEDED"
+                traceId: "00-9900aabbccddeeff0011223344556677-556677889900aabb-01"
+                timestamp: "2026-10-31T08:07:00.120Z"
+                extensions:
+                  retryAfterSeconds: 30
+                  limit: 60
+                  windowSeconds: 60
+                  rateLimitScope: "BarcodeLookupPerUser"
+
+    503ExternalServiceUnavailable:
+      description: Зовнішній каталог (Open Food Facts) тимчасово недоступний (Circuit Breaker OPEN).
+      headers:
+        Retry-After:
+          description: Час відновлення перевірки запобіжника в секундах.
+          schema:
+            type: integer
+            example: 15
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ExternalServiceUnavailableProblemDetails'
+          examples:
+            circuitBreakerOpen:
+              summary: Відкритий стан Circuit Breaker
+              value:
+                type: "https://ediens.app/errors/external-service-unavailable"
+                title: "External Service Unavailable"
+                status: 503
+                detail: "The external product catalog service (Open Food Facts) is temporarily unresponsive. Circuit breaker is currently OPEN."
+                instance: "/api/v1/products/barcode/4820000998877"
+                errorCode: "EXTERNAL_SERVICE_UNAVAILABLE"
+                traceId: "00-bbccddee0011223344556677889900aa-77889900aabbccdd-01"
+                timestamp: "2026-10-31T08:07:30.430Z"
+                extensions:
+                  serviceName: "OpenFoodFactsApi"
+                  circuitBreakerState: "OPEN"
+                  retryAfterSeconds: 15
+
+  # ===========================================================================
+  # SCHEMAS: Domain Models, Enums, and RFC 9457 Structures
+  # ===========================================================================
+  schemas:
+    # -------------------------------------------------------------------------
+    # Core Enums
+    # -------------------------------------------------------------------------
+    StorageLocation:
+      type: string
+      enum: [Fridge, Freezer, Pantry]
+      description: Локація зберігання партії продукту в домогосподарстві.
+      example: Fridge
+
+    MeasurementUnit:
+      type: string
+      enum: [g, ml, pcs]
+      description: Стандартизована одиниця вимірювання ваги/об'єму.
+      example: ml
+
+    MealType:
+      type: string
+      enum: [Breakfast, Lunch, Dinner, Snack]
+      description: Тип прийому їжі у щоденнику харчування.
+      example: Breakfast
+
+    FreshnessStatus:
+      type: string
+      enum: [FRESH, EXPIRING_SOON, CRITICAL, EXPIRED]
+      description: |
+        Динамічний статус свіжості партії за FEFO:
+        - `FRESH`: > 3 днів до завершення строку придатності
+        - `EXPIRING_SOON`: 1–3 дні
+        - `CRITICAL`: < 24 годин
+        - `EXPIRED`: термін придатності минув
+      example: FRESH
+
+    # -------------------------------------------------------------------------
+    # Inventory Schemas
+    # -------------------------------------------------------------------------
+    CreateInventoryItemRequest:
+      type: object
+      required:
+        - householdId
+        - productName
+        - location
+        - quantity
+        - unit
+        - expiresAt
+      properties:
+        householdId:
+          type: string
+          format: uuid
+          description: Ідентифікатор домогосподарства.
+          example: 0192e2b0-8812-7001-9011-aa9988776655
+        productId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Зв'язок з глобальним продуктом у каталозі (якщо знайдено).
+          example: 0192e2b1-0000-7000-8000-000000000001
+        productName:
+          type: string
+          minLength: 2
+          maxLength: 255
+          description: Людиночитна назва товару.
+          example: "Молоко 'Селянське' 2.5%"
+        location:
+          $ref: '#/components/schemas/StorageLocation'
+        quantity:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 100000
+          description: Початкова кількість партії (невід'ємне значення).
+          example: 1000.0
+        unit:
+          $ref: '#/components/schemas/MeasurementUnit'
+        expiresAt:
+          type: string
+          format: date-time
+          description: Дата та час завершення терміну придатності (UTC).
+          example: "2026-11-08T00:00:00Z"
+        openedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Дата та час відкриття упаковки (якщо вже відкрито).
+          example: null
+
+    UpdateInventoryItemQuantityRequest:
+      type: object
+      required:
+        - quantityDelta
+      properties:
+        quantityDelta:
+          type: number
+          description: Зміна залишку (від'ємне число для списання, додатне для поповнення).
+          example: -400.0
+        markOpened:
+          type: boolean
+          default: false
+          description: Чи встановити openedAt = поточний час при цьому списанні.
+          example: true
+
+    InventoryItemResponse:
+      type: object
+      required:
+        - id
+        - householdId
+        - productName
+        - location
+        - quantity
+        - unit
+        - expiresAt
+        - etag
+        - freshnessStatus
+        - daysUntilExpiration
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192e2b3-5730-7432-8411-cf0b91d23456
+        householdId:
+          type: string
+          format: uuid
+          example: 0192e2b0-8812-7001-9011-aa9988776655
+        productId:
+          type: string
+          format: uuid
+          nullable: true
+          example: 0192e2b1-0000-7000-8000-000000000001
+        productName:
+          type: string
+          example: "Молоко 'Селянське' 2.5%"
+        location:
+          $ref: '#/components/schemas/StorageLocation'
+        quantity:
+          type: number
+          minimum: 0
+          example: 600.0
+        unit:
+          $ref: '#/components/schemas/MeasurementUnit'
+        expiresAt:
+          type: string
+          format: date-time
+          example: "2026-11-08T00:00:00Z"
+        openedAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-10-31T08:15:00Z"
+        etag:
+          type: string
+          description: Слабкий ETag версії xmin.
+          example: 'W/"10425"'
+        freshnessStatus:
+          $ref: '#/components/schemas/FreshnessStatus'
+        daysUntilExpiration:
+          type: integer
+          example: 8
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-10-31T08:10:00Z"
+
+    InventoryItemListResponse:
+      type: object
+      required:
+        - householdId
+        - totalCount
+        - items
+      properties:
+        householdId:
+          type: string
+          format: uuid
+          example: 0192e2b0-8812-7001-9011-aa9988776655
+        totalCount:
+          type: integer
+          example: 2
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InventoryItemResponse'
+
+    # -------------------------------------------------------------------------
+    # Nutrition & Meal Logging Schemas
+    # -------------------------------------------------------------------------
+    MealLogItemInput:
+      type: object
+      required:
+        - productName
+        - quantity
+        - unit
+      properties:
+        productId:
+          type: string
+          format: uuid
+          nullable: true
+          example: 0192e2b1-0000-7000-8000-000000000001
+        productName:
+          type: string
+          example: "Молоко 'Селянське' 2.5%"
+        quantity:
+          type: number
+          exclusiveMinimum: 0
+          example: 200.0
+        unit:
+          $ref: '#/components/schemas/MeasurementUnit'
+
+    CreateMealLogRequest:
+      type: object
+      required:
+        - mealType
+        - loggedAt
+        - items
+      properties:
+        mealType:
+          $ref: '#/components/schemas/MealType'
+        loggedAt:
+          type: string
+          format: date-time
+          example: "2026-10-31T08:30:00Z"
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/MealLogItemInput'
+
+    MacroBudgetValues:
+      type: object
+      required:
+        - calories
+        - protein
+        - fat
+        - carbs
+      properties:
+        calories:
+          type: number
+          example: 1858.0
+        protein:
+          type: number
+          example: 145.2
+        fat:
+          type: number
+          example: 56.8
+        carbs:
+          type: number
+          example: 187.6
+
+    MealLogResponse:
+      type: object
+      required:
+        - id
+        - userId
+        - mealType
+        - loggedAt
+        - calories
+        - protein
+        - fat
+        - carbs
+        - itemsCount
+        - remainingBudgetToday
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192e2ba-4455-7001-8123-aa1122334455
+        userId:
+          type: string
+          format: uuid
+          example: 0192e2b0-1111-7000-8000-000000000001
+        mealType:
+          $ref: '#/components/schemas/MealType'
+        loggedAt:
+          type: string
+          format: date-time
+          example: "2026-10-31T08:30:00Z"
+        calories:
+          type: number
+          example: 342.0
+        protein:
+          type: number
+          example: 14.8
+        fat:
+          type: number
+          example: 8.2
+        carbs:
+          type: number
+          example: 52.4
+        itemsCount:
+          type: integer
+          example: 2
+        remainingBudgetToday:
+          $ref: '#/components/schemas/MacroBudgetValues'
+
+    SetNutritionTargetsRequest:
+      type: object
+      required:
+        - targetCalories
+        - targetProtein
+        - targetFat
+        - targetCarbs
+      properties:
+        targetCalories:
+          type: number
+          minimum: 500
+          maximum: 10000
+          example: 2200.0
+        targetProtein:
+          type: number
+          minimum: 20
+          maximum: 500
+          example: 160.0
+        targetFat:
+          type: number
+          minimum: 10
+          maximum: 300
+          example: 65.0
+        targetCarbs:
+          type: number
+          minimum: 20
+          maximum: 1000
+          example: 240.0
+        effectiveFrom:
+          type: string
+          format: date
+          example: "2026-10-31"
+
+    NutritionTargetsResponse:
+      type: object
+      required:
+        - id
+        - userId
+        - targetCalories
+        - targetProtein
+        - targetFat
+        - targetCarbs
+        - effectiveFrom
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192e2bb-8899-7002-9900-ccddeeff1122
+        userId:
+          type: string
+          format: uuid
+          example: 0192e2b0-1111-7000-8000-000000000001
+        targetCalories:
+          type: number
+          example: 2200.0
+        targetProtein:
+          type: number
+          example: 160.0
+        targetFat:
+          type: number
+          example: 65.0
+        targetCarbs:
+          type: number
+          example: 240.0
+        effectiveFrom:
+          type: string
+          format: date
+          example: "2026-10-31"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-10-31T08:35:00Z"
+
+    # -------------------------------------------------------------------------
+    # Recipe Recommendations & 1-Click Cook Schemas
+    # -------------------------------------------------------------------------
+    RecipeRecommendationItem:
+      type: object
+      required:
+        - recipeId
+        - title
+        - prepTimeMinutes
+        - calories
+        - protein
+        - fat
+        - carbs
+        - matchScore
+        - expiringIngredientsCount
+        - missingIngredientsCount
+        - canCookImmediately
+      properties:
+        recipeId:
+          type: string
+          format: uuid
+          example: 0192e2b8-1234-7111-9988-bbccddeeff00
+        title:
+          type: string
+          example: "Куряче філе з гречкою та шпинатом"
+        description:
+          type: string
+          example: "Високобілкова вечеря зі свіжим шпинатом та філе."
+        prepTimeMinutes:
+          type: integer
+          example: 25
+        calories:
+          type: number
+          example: 520.0
+        protein:
+          type: number
+          example: 58.0
+        fat:
+          type: number
+          example: 8.5
+        carbs:
+          type: number
+          example: 48.0
+        matchScore:
+          type: number
+          description: Розрахований скоринг відповідності (0–100).
+          example: 94.5
+        expiringIngredientsCount:
+          type: integer
+          description: Кількість інгредієнтів з терміном придатності < 72h.
+          example: 2
+        missingIngredientsCount:
+          type: integer
+          description: Кількість відсутніх або дефіцитних інгредієнтів.
+          example: 0
+        canCookImmediately:
+          type: boolean
+          example: true
+
+    RecipeRecommendationListResponse:
+      type: object
+      required:
+        - householdId
+        - generatedAt
+        - recommendations
+      properties:
+        householdId:
+          type: string
+          format: uuid
+          example: 0192e2b0-8812-7001-9011-aa9988776655
+        generatedAt:
+          type: string
+          format: date-time
+          example: "2026-10-31T08:40:00Z"
+        recommendations:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecipeRecommendationItem'
+
+    CookRecipeRequest:
+      type: object
+      required:
+        - householdId
+        - servings
+        - mealType
+      properties:
+        householdId:
+          type: string
+          format: uuid
+          example: 0192e2b0-8812-7001-9011-aa9988776655
+        servings:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 1
+          example: 1
+        mealType:
+          $ref: '#/components/schemas/MealType'
+
+    CookedBatchDeduction:
+      type: object
+      required:
+        - batchId
+        - productName
+        - deductedQuantity
+        - remainingQuantity
+        - unit
+      properties:
+        batchId:
+          type: string
+          format: uuid
+          example: 0192e2b3-9999-7432-8411-cf0b91d29999
+        productName:
+          type: string
+          example: "Куряче філе охолоджене"
+        deductedQuantity:
+          type: number
+          example: 200.0
+        remainingQuantity:
+          type: number
+          example: 300.0
+        unit:
+          $ref: '#/components/schemas/MeasurementUnit'
+
+    CookRecipeResponse:
+      type: object
+      required:
+        - recipeId
+        - mealLogId
+        - servingsCooked
+        - deductedBatches
+        - loggedMacros
+      properties:
+        recipeId:
+          type: string
+          format: uuid
+          example: 0192e2b8-1234-7111-9988-bbccddeeff00
+        mealLogId:
+          type: string
+          format: uuid
+          example: 0192e2bc-9900-7111-8822-eeddccbbaa11
+        servingsCooked:
+          type: integer
+          example: 1
+        deductedBatches:
+          type: array
+          items:
+            $ref: '#/components/schemas/CookedBatchDeduction'
+        loggedMacros:
+          $ref: '#/components/schemas/MacroBudgetValues'
+
+    # -------------------------------------------------------------------------
+    # Product Barcode Schemas
+    # -------------------------------------------------------------------------
+    ProductBarcodeDetailsResponse:
+      type: object
+      required:
+        - barcode
+        - name
+        - caloriesPer100g
+        - proteinPer100g
+        - fatPer100g
+        - carbsPer100g
+        - dataSource
+        - isCached
+      properties:
+        barcode:
+          type: string
+          example: "4820000112233"
+        name:
+          type: string
+          example: "Сир кисломолочний 5%"
+        brand:
+          type: string
+          nullable: true
+          example: "Яготинське"
+        caloriesPer100g:
+          type: number
+          example: 121.0
+        proteinPer100g:
+          type: number
+          example: 17.0
+        fatPer100g:
+          type: number
+          example: 5.0
+        carbsPer100g:
+          type: number
+          example: 2.0
+        dataSource:
+          type: string
+          enum: [LocalDatabase, OpenFoodFacts]
+          example: "OpenFoodFacts"
+        isCached:
+          type: boolean
+          example: true
+
+    # -------------------------------------------------------------------------
+    # Shopping List Schemas
+    # -------------------------------------------------------------------------
+    ShoppingListClientChange:
+      type: object
+      required:
+        - id
+        - productName
+        - quantity
+        - unit
+        - isPurchased
+        - clientUpdatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192e2bd-1100-7432-8000-001122334455
+        productName:
+          type: string
+          example: "Вівсяні пластівці"
+        quantity:
+          type: number
+          exclusiveMinimum: 0
+          example: 1.0
+        unit:
+          $ref: '#/components/schemas/MeasurementUnit'
+        isPurchased:
+          type: boolean
+          example: true
+        clientUpdatedAt:
+          type: string
+          format: date-time
+          example: "2026-10-31T08:42:10Z"
+
+    ShoppingListSyncRequest:
+      type: object
+      required:
+        - lastSyncTimestamp
+        - clientChanges
+      properties:
+        lastSyncTimestamp:
+          type: string
+          format: date-time
+          example: "2026-10-31T08:00:00Z"
+        clientChanges:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShoppingListClientChange'
+
+    ShoppingListItemResponse:
+      type: object
+      required:
+        - id
+        - productName
+        - quantity
+        - unit
+        - isPurchased
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192e2bd-1100-7432-8000-001122334455
+        productName:
+          type: string
+          example: "Вівсяні пластівці"
+        quantity:
+          type: number
+          example: 1.0
+        unit:
+          $ref: '#/components/schemas/MeasurementUnit'
+        isPurchased:
+          type: boolean
+          example: true
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-10-31T08:42:10Z"
+
+    ShoppingListSyncResponse:
+      type: object
+      required:
+        - householdId
+        - serverTimestamp
+        - items
+      properties:
+        householdId:
+          type: string
+          format: uuid
+          example: 0192e2b0-8812-7001-9011-aa9988776655
+        serverTimestamp:
+          type: string
+          format: date-time
+          example: "2026-10-31T08:45:00Z"
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShoppingListItemResponse'
+
+    # -------------------------------------------------------------------------
+    # RFC 9457 PROBLEM DETAILS DATA STRUCTURES
+    # -------------------------------------------------------------------------
+    BaseProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - instance
+        - errorCode
+        - traceId
+        - timestamp
+      properties:
+        type:
+          type: string
+          format: uri
+          description: Абсолютний URI класу проблеми згідно з RFC 9457.
+          example: "https://ediens.app/errors/generic-error"
+        title:
+          type: string
+          description: Короткий стабільний людиночитний опис типу проблеми.
+          example: "A business domain error occurred."
+        status:
+          type: integer
+          description: Код стану протоколу HTTP.
+          example: 400
+        detail:
+          type: string
+          description: Детальне пояснення конкретного випадку помилки.
+          example: "Detailed explanation of the error."
+        instance:
+          type: string
+          description: URI ендпоінту, де сталася помилка.
+          example: "/api/v1/resource/123"
+        errorCode:
+          type: string
+          description: Унікальний машинночитний код помилки в UPPER_SNAKE_CASE.
+          example: "GENERIC_ERROR"
+        traceId:
+          type: string
+          description: Ідентифікатор W3C TraceContext для аудиту та розподіленого трейсингу.
+          example: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+        timestamp:
+          type: string
+          format: date-time
+          description: Часова мітка виникнення помилки за стандартом ISO-8601 UTC.
+          example: "2026-10-31T08:05:00.120Z"
+
+    ValidationProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/BaseProblemDetails'
+        - type: object
+          properties:
+            extensions:
+              type: object
+              required:
+                - errors
+              properties:
+                errors:
+                  type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+                  example:
+                    quantity:
+                      - "Quantity must be greater than 0."
+                    unit:
+                      - "Unit 'kilogram' is invalid. Permitted units: 'g', 'ml', 'pcs'."
+                invalidParams:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      reason:
+                        type: string
+                      value: {}
+
+    UnauthorizedProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/BaseProblemDetails'
+        - type: object
+          properties:
+            extensions:
+              type: object
+              properties:
+                tokenExpiredAt:
+                  type: string
+                  format: date-time
+                  example: "2026-10-31T07:55:00Z"
+                canRefresh:
+                  type: boolean
+                  example: true
+
+    HouseholdAccessDeniedProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/BaseProblemDetails'
+        - type: object
+          properties:
+            extensions:
+              type: object
+              required:
+                - householdId
+                - requiredRole
+              properties:
+                householdId:
+                  type: string
+                  format: uuid
+                  example: 0192e2b0-8812-7001-9011-aa9988776655
+                requiredRole:
+                  type: string
+                  example: "Member"
+                currentMembershipStatus:
+                  type: string
+                  example: "NOT_A_MEMBER"
+
+    ItemNotFoundProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/BaseProblemDetails'
+        - type: object
+          properties:
+            extensions:
+              type: object
+              required:
+                - resourceType
+                - resourceId
+              properties:
+                resourceType:
+                  type: string
+                  example: "InventoryBatch"
+                resourceId:
+                  type: string
+                  example: "0192e2b3-5730-7432-8411-cf0b91d23456"
+
+    ConcurrentModificationProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/BaseProblemDetails'
+        - type: object
+          properties:
+            extensions:
+              type: object
+              required:
+                - currentETag
+                - currentQuantity
+                - unit
+              properties:
+                currentETag:
+                  type: string
+                  description: Актуальний ETag на сервері.
+                  example: 'W/"10425"'
+                clientExpectedETag:
+                  type: string
+                  description: Застарілий ETag, надісланий у If-Match.
+                  example: 'W/"10423"'
+                currentQuantity:
+                  type: number
+                  description: Поточний актуальний залишок у БД.
+                  example: 600.0
+                unit:
+                  $ref: '#/components/schemas/MeasurementUnit'
+                productName:
+                  type: string
+                  example: "Молоко 'Селянське' 2.5%"
+                lastModifiedBy:
+                  type: string
+                  example: "Anna"
+                lastModifiedAt:
+                  type: string
+                  format: date-time
+                  example: "2026-10-31T08:05:58.210Z"
+
+    IdempotencyConflictProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/BaseProblemDetails'
+        - type: object
+          properties:
+            extensions:
+              type: object
+              required:
+                - idempotencyKey
+                - state
+              properties:
+                idempotencyKey:
+                  type: string
+                  format: uuid
+                  example: 0192e2b9-1122-7f30-8111-cc0099887766
+                state:
+                  type: string
+                  enum: [IN_FLIGHT, COMPLETED_WITH_DIFFERENT_PAYLOAD]
+                  example: IN_FLIGHT
+                lockExpiresInMs:
+                  type: integer
+                  example: 2400
+
+    MissingIngredientDetail:
+      type: object
+      required:
+        - productId
+        - productName
+        - requiredQuantity
+        - availableQuantity
+        - unit
+        - shortfall
+      properties:
+        productId:
+          type: string
+          format: uuid
+          example: 0192e2b1-0000-7000-8000-000000000002
+        productName:
+          type: string
+          example: "Куряче філе охолоджене"
+        requiredQuantity:
+          type: number
+          example: 400.0
+        availableQuantity:
+          type: number
+          example: 250.0
+        unit:
+          $ref: '#/components/schemas/MeasurementUnit'
+        shortfall:
+          type: number
+          description: Розмір нестачі інгредієнта (required - available).
+          example: 150.0
+
+    InsufficientInventoryProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/BaseProblemDetails'
+        - type: object
+          properties:
+            extensions:
+              type: object
+              required:
+                - recipeId
+                - requestedServings
+                - missingIngredients
+              properties:
+                recipeId:
+                  type: string
+                  format: uuid
+                  example: 0192e2b8-1234-7111-9988-bbccddeeff00
+                requestedServings:
+                  type: integer
+                  example: 2
+                missingIngredients:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/MissingIngredientDetail'
+
+    RateLimitExceededProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/BaseProblemDetails'
+        - type: object
+          properties:
+            extensions:
+              type: object
+              required:
+                - retryAfterSeconds
+                - limit
+                - windowSeconds
+              properties:
+                retryAfterSeconds:
+                  type: integer
+                  description: Кількість секунд очікування до розблокування.
+                  example: 30
+                limit:
+                  type: integer
+                  example: 60
+                windowSeconds:
+                  type: integer
+                  example: 60
+                rateLimitScope:
+                  type: string
+                  example: "BarcodeLookupPerUser"
+
+    ExternalServiceUnavailableProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/BaseProblemDetails'
+        - type: object
+          properties:
+            extensions:
+              type: object
+              required:
+                - serviceName
+                - circuitBreakerState
+              properties:
+                serviceName:
+                  type: string
+                  example: "OpenFoodFactsApi"
+                circuitBreakerState:
+                  type: string
+                  enum: [OPEN, HALF_OPEN]
+                  example: "OPEN"
+                retryAfterSeconds:
+                  type: integer
+                  example: 15
