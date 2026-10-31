@@ -1,0 +1,32 @@
+{
+  "id": "QOL-06",
+  "title": "QoL E2E Smoke Test Suite, OpenAPI 3.1 Spec Refresh & System Verification",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": "2026-10-31T21:30:00Z",
+  "branch": "chore/QOL-06-e2e-smoke-and-spec-refresh",
+  "dependencies": [
+    "QOL-01",
+    "QOL-02",
+    "QOL-03",
+    "QOL-04",
+    "QOL-05"
+  ],
+  "allowed_paths": [
+    "scripts/**",
+    "docs/**",
+    "src/Ediens.Tests/**"
+  ],
+  "deliverables": [
+    "scripts/smoke-test.sh",
+    "docs/Ediens_OpenAPI.yaml",
+    "docs/Ediens_SRS.md",
+    "docs/VERIFICATION.md"
+  ],
+  "acceptance_criteria": [
+    "Update docs/Ediens_OpenAPI.yaml with all new endpoints: POST /shopping-list/transfer-to-inventory, GET /products/search, POST /households/join, and GET /households/{id}/members.",
+    "Update scripts/smoke-test.sh to test live transfer-to-inventory, product text search, and household join against real PostgreSQL database.",
+    "Run ./scripts/verify.sh with exit code 0 confirming all linters, .NET integration tests, Vite production build, and docker compose stacks pass cleanly.",
+    "Document comprehensive verification results, test run logs, and QoL feature matrix in docs/VERIFICATION.md."
+  ]
+}

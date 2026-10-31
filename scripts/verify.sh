@@ -18,8 +18,8 @@ ERRORS=0
 # ------------------------------------------------------------------------------
 # 1. Check Task Queue JSON Integrity (TASK-* and FIX-*)
 # ------------------------------------------------------------------------------
-echo "[1/7] Checking task queue JSON validity (TASK-* and FIX-*)..."
-TASK_FILES=(.agents/tasks/TASK-*.json .agents/tasks/FIX-*.json)
+echo "[1/7] Checking task queue JSON validity (TASK-*, FIX-*, QOL-*)..."
+TASK_FILES=(.agents/tasks/TASK-*.json .agents/tasks/FIX-*.json .agents/tasks/QOL-*.json)
 CHECKED_TASKS=0
 for task_file in "${TASK_FILES[@]}"; do
   if [ -f "$task_file" ]; then

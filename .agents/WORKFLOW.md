@@ -20,6 +20,16 @@ To allow true parallel work across 2 physical PCs without human dispatchers or m
 | **TASK-07** | `feat/TASK-07-react-feature-views` | `src/ediens-web/src/features/**`, `src/ediens-web/src/pages/**` | `TASK-05` |
 | **TASK-08** | `chore/TASK-08-docker-monitoring-verification` | `Dockerfile`, `compose*.yaml`, `infra/**`, `docs/LOCAL_*.md`, `docs/VERIFICATION.md`, `scripts/verify.sh` | `TASK-06`, `TASK-07` |
 
+### Phase 3: Quality of Life & Bug Fix Matrix
+| Task | Owner Branch | Allowed Paths / Deliverables | Dependencies |
+| :--- | :--- | :--- | :--- |
+| **QOL-01** | `feat/QOL-01-shopping-to-inventory-transfer` | `src/Ediens.Api/Features/ShoppingList/**`, `src/Ediens.Api/Features/Inventory/**`, `src/ediens-web/src/features/shopping/**`, `src/ediens-web/src/api/client.ts`, `src/Ediens.Tests/**`, `docs/Ediens_OpenAPI.yaml` | `FIX-07` |
+| **QOL-02** | `feat/QOL-02-inventory-edit-and-spoilage` | `src/Ediens.Api/Features/Inventory/**`, `src/ediens-web/src/features/inventory/**`, `src/ediens-web/src/api/client.ts`, `src/Ediens.Tests/**` | `FIX-07` |
+| **QOL-03** | `feat/QOL-03-product-search-and-custom-macros` | `src/Ediens.Api/Features/Products/**`, `src/Ediens.Api/Features/Meals/**`, `src/ediens-web/src/features/macros/**`, `src/ediens-web/src/features/inventory/AddInventoryModal.tsx`, `src/ediens-web/src/api/client.ts`, `src/Ediens.Tests/**` | `FIX-07` |
+| **QOL-04** | `feat/QOL-04-recipe-servings-and-shortfall-purchase` | `src/Ediens.Api/Features/Recipes/**`, `src/ediens-web/src/features/recipes/**`, `src/ediens-web/src/api/client.ts` | `FIX-07` |
+| **QOL-05** | `feat/QOL-05-household-switcher-and-invites` | `src/Ediens.Api/Features/Households/**`, `src/ediens-web/src/App.tsx`, `src/ediens-web/src/components/ui/**`, `src/ediens-web/src/features/household/**`, `src/ediens-web/src/api/client.ts`, `src/Ediens.Tests/**` | `FIX-07` |
+| **QOL-06** | `chore/QOL-06-e2e-smoke-and-spec-refresh` | `scripts/**`, `docs/**`, `src/Ediens.Tests/**` | `QOL-01`, `QOL-02`, `QOL-03`, `QOL-04`, `QOL-05` |
+
 ---
 
 ## 2. Distributed Task Locking Protocol

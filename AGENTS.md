@@ -25,21 +25,21 @@ You can run `./scripts/claim-task.sh` to automate steps 2.1–2.4, or execute th
    git checkout develop
    git pull origin develop --rebase
    ```
-2. Scan `.agents/tasks/TASK-*.json` and `.agents/tasks/FIX-*.json` in numerical order (Phase 2 tasks `FIX-01` through `FIX-06`).
+2. Scan `.agents/tasks/TASK-*.json`, `.agents/tasks/FIX-*.json`, and `.agents/tasks/QOL-*.json` in numerical order (Phase 3 QoL tasks `QOL-01` through `QOL-06`).
 3. Select the first task where:
    - `"status": "TODO"`
    - **ALL** task IDs listed in its `"dependencies"` array have `"status": "DONE"`.
 
 ### 2.2 Atomic Locking on `develop`
-1. Edit **ONLY** that task's JSON file (`.agents/tasks/TASK-XX.json` or `.agents/tasks/FIX-XX.json`):
+1. Edit **ONLY** that task's JSON file (`.agents/tasks/QOL-XX.json`, `.agents/tasks/FIX-XX.json`, or `.agents/tasks/TASK-XX.json`):
    - Set `"status": "IN_PROGRESS"`
    - Set `"assigned_to": "<hostname>"` (e.g., `$(hostname -s)`)
    - Set `"updated_at": "<ISO-8601 UTC timestamp>"` (e.g., `$(date -u +"%Y-%m-%dT%H:%M:%SZ")`)
 2. Commit and push ONLY that file directly to `origin/develop`:
    ```bash
-   git add .agents/tasks/FIX-XX.json # or TASK-XX.json
+   git add .agents/tasks/QOL-XX.json # or FIX-XX.json / TASK-XX.json
 
-   git commit -m "chore(lock): claim TASK-XX on $(hostname -s)"
+   git commit -m "chore(lock): claim QOL-XX on $(hostname -s)"
    git push origin develop
    ```
 3. **Race Condition Recovery:** If `git push origin develop` is rejected (the other PC claimed a task at the exact same second), immediately run:
