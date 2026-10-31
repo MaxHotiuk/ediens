@@ -43,7 +43,7 @@ public class EdiensTestApplication : WebApplicationFactory<Program>
             using var scope = sp.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<EdiensDbContext>();
             db.Database.EnsureCreated();
-            DatabaseSeeder.SeedAsync(db).GetAwaiter().GetResult();
+            DbInitializer.SeedAsync(db).GetAwaiter().GetResult();
         });
     }
 

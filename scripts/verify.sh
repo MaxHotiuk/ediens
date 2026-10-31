@@ -94,6 +94,13 @@ if [ -d "$SRC_WEB_DIR" ]; then
     ERRORS=$((ERRORS + 1))
   fi
 
+  # 3.3 Anti-Mock Persistence Gate: Zero browser storage in domain code
+  if grep -rnE "localStorage\.(setItem|getItem)|sessionStorage\.(setItem|getItem)|useLocalStorage" src/ediens-web/src/features/ src/ediens-web/src/pages/ src/ediens-web/src/api/ src/ediens-web/src/store/ 2>/dev/null; then
+    echo "❌ ERROR: Browser storage persistence found in frontend domain code!"
+    exit 1
+  fi
+  echo "  ✓ Zero browser storage persistence detected (all domain data wired to API & PostgreSQL)."
+
   echo "  ✓ Static anti-mock scan passed (zero banned mock patterns found)."
 else
   echo "  [ERROR] Frontend source directory not found at $SRC_WEB_DIR"
