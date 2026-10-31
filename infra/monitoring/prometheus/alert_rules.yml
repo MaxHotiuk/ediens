@@ -1,0 +1,66 @@
+# ==============================================================================
+# Prometheus Alerting Rules for ēdiens Platform (SRS Section 12.6)
+# ==============================================================================
+
+groups:
+  - name: ediens_sla_alerts
+    rules:
+      # Alert 1: Service Availability Down
+      - alert: EdiensApiDown
+        expr: up{job="ediens-api"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "ēdiens Web API is DOWN"
+          description: "Instance {{ $labels.instance }} of ediens-api has been unreachable for more than 30 seconds."
+
+      # Alert 2: API Latency p95 SLA Exceeded (NFR-01)
+      - alert: HighApiLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler)) > 0.250
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API Latency p95 > 250ms on {{ $labels.handler }}"
+          description: "Endpoint {{ $labels.handler }} p95 response time is {{ $value }}s, exceeding 150ms-250ms SLA target."
+
+      # Alert 3: Critical HTTP 5xx Error Spike
+      - alert: HighHttp5xxErrorRate
+        expr: (sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))) * 100 > 1.0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HTTP 5xx server error rate exceeded 1%"
+          description: "Server error rate is currently at {{ $value }}% across active traffic."
+
+      # Alert 4: Spike in Optimistic Concurrency Conflicts (HTTP 409 xmin collisions)
+      - alert: HighInventoryConcurrencyConflicts
+        expr: sum(rate(inventory_concurrency_conflicts_total[5m])) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High frequency of inventory concurrency conflicts (HTTP 409)"
+          description: "Concurrent batch modification conflicts rate is {{ $value }}/sec."
+
+      # Alert 5: Transactional Outbox Lagging High
+      - alert: OutboxProcessingLagHigh
+        expr: outbox_messages_lag_seconds > 60
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Transactional Outbox consumer is lagging"
+          description: "Outbox processing delay is {{ $value }} seconds. Check background worker logs."
+
+      # Alert 6: Circuit Breaker for External API is Open
+      - alert: OpenFoodFactsCircuitBreakerOpen
+        expr: circuit_breaker_state{target_service="open_food_facts"} == 2
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Circuit Breaker for Open Food Facts is OPEN"
+          description: "External barcode API is failing or timing out. Traffic is being routed to local fallback cache."

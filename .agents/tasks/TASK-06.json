@@ -1,0 +1,29 @@
+{
+  "id": "TASK-06",
+  "title": ".NET 10 API Feature Endpoints Implementation and Concurrency Tests",
+  "status": "DONE",
+  "assigned_to": "voyager-ASUS",
+  "updated_at": "2026-10-31T08:35:45Z",
+  "branch": "feat/TASK-06-dotnet-api-endpoints-and-tests",
+  "dependencies": [
+    "TASK-03",
+    "TASK-04"
+  ],
+  "allowed_paths": [
+    "src/Ediens.Api/Features/**",
+    "src/Ediens.Api/Program.cs",
+    "src/Ediens.Tests/**"
+  ],
+  "deliverables": [
+    "src/Ediens.Api/Features/**",
+    "src/Ediens.Api/Program.cs",
+    "src/Ediens.Tests/**"
+  ],
+  "acceptance_criteria": [
+    "Implementation of all 10+ endpoints: Inventory CRUD, FEFO sorting, ETag item consumption, Meal logging, Macro target setting, Recipe recommendations, 1-Click Cook, Barcode lookup, Household Shopping List sync.",
+    "Optimistic Concurrency validation (409 Conflict when ETag mismatch on item consumption).",
+    "Domain invariant enforcement (422 Unprocessable Content when inventory insufficient for cook).",
+    "Multi-tenant household access check (403 Forbidden).",
+    "xUnit unit and concurrency tests verifying optimistic locking, idempotency, and rate limiting."
+  ]
+}

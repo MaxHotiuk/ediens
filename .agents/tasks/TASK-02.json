@@ -1,0 +1,36 @@
+{
+  "id": "TASK-02",
+  "title": "System Architecture, Distributed Concurrency Patterns, and NFRs",
+  "status": "DONE",
+  "assigned_to": "voyager-ASUS",
+  "updated_at": "2026-10-31T08:03:05Z",
+  "branch": "docs/TASK-02-architecture-concurrency-nfrs",
+  "dependencies": [],
+  "allowed_paths": [
+    "docs/Ediens_SRS/04-architecture.md",
+    "docs/Ediens_SRS/06-concurrency-patterns.md",
+    "docs/Ediens_SRS/08-resiliency-model.md",
+    "docs/Ediens_SRS/09-security-model.md",
+    "docs/Ediens_SRS/10-deployment-model.md",
+    "docs/Ediens_SRS/11-analytics-model.md",
+    "docs/Ediens_SRS/12-monitoring-alerting-model.md",
+    "scripts/generate_architecture_diagram.py"
+  ],
+  "deliverables": [
+    "docs/Ediens_SRS/04-architecture.md",
+    "docs/Ediens_SRS/06-concurrency-patterns.md",
+    "docs/Ediens_SRS/08-resiliency-model.md",
+    "docs/Ediens_SRS/09-security-model.md",
+    "docs/Ediens_SRS/10-deployment-model.md",
+    "docs/Ediens_SRS/11-analytics-model.md",
+    "docs/Ediens_SRS/12-monitoring-alerting-model.md",
+    "scripts/generate_architecture_diagram.py"
+  ],
+  "acceptance_criteria": [
+    "High-level architecture script using Python diagrams library saved in scripts/generate_architecture_diagram.py.",
+    "C4 / Container architecture diagram embedded in docs/Ediens_SRS/04-architecture.md.",
+    "5 distributed concurrency patterns documented in 06-concurrency-patterns.md using both Mermaid sequenceDiagram and WebSequenceDiagrams compatible blocks.",
+    "Detailed explanation of ETag/xmin, Redis distributed lock with idempotency, transactional outbox with SKIP LOCKED, pessimistic row locking for macro budgets, and HybridCache singleflight.",
+    "At least 6 Non-Functional Requirements documented across chapters 08–12 (Resiliency, Security, Deployment, Analytics, Monitoring)."
+  ]
+}

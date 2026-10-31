@@ -1,0 +1,26 @@
+{
+  "id": "TASK-01",
+  "title": "SRS Core Specifications, Personas, and PostgreSQL Data Model",
+  "status": "DONE",
+  "assigned_to": "Maxs-MacBook-Air",
+  "updated_at": "2026-10-31T07:58:20Z",
+  "branch": "docs/TASK-01-srs-core-and-data-model",
+  "dependencies": [],
+  "allowed_paths": [
+    "docs/Ediens_SRS.md",
+    "docs/Ediens_SRS/03-product-description.md",
+    "docs/Ediens_SRS/07-data-model.md"
+  ],
+  "deliverables": [
+    "docs/Ediens_SRS.md",
+    "docs/Ediens_SRS/03-product-description.md",
+    "docs/Ediens_SRS/07-data-model.md"
+  ],
+  "acceptance_criteria": [
+    "Master SRS index following jam01/SRS-Template and USAID SRS standards in docs/Ediens_SRS.md.",
+    "3 detailed Actors/Personas (Meal Prepper, Household Member, Background Nutrition Engine Worker) in 03-product-description.md.",
+    "12 Functional Requirements (FR-01 to FR-12) with clear acceptance criteria and priority in 03-product-description.md.",
+    "Complete PostgreSQL ER diagram in Mermaid erDiagram syntax and relational table definitions in 07-data-model.md.",
+    "Table schemas include xmin rowversion concurrency tokens, outbox_messages table, and idempotency_records table."
+  ]
+}

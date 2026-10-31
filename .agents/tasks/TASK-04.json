@@ -1,0 +1,29 @@
+{
+  "id": "TASK-04",
+  "title": ".NET 10 Web API Backend Foundation and Infrastructure",
+  "status": "DONE",
+  "assigned_to": "voyager-ASUS",
+  "updated_at": "2026-10-31T08:20:09Z",
+  "branch": "feat/TASK-04-dotnet-backend-foundation",
+  "dependencies": [
+    "TASK-01"
+  ],
+  "allowed_paths": [
+    "src/Ediens.Api/**"
+  ],
+  "deliverables": [
+    "src/Ediens.Api/Ediens.Api.csproj",
+    "src/Ediens.Api/Program.cs",
+    "src/Ediens.Api/Data/**",
+    "src/Ediens.Api/Entities/**",
+    "src/Ediens.Api/Common/Errors/**",
+    "src/Ediens.Api/Middleware/**"
+  ],
+  "acceptance_criteria": [
+    ".NET 10 Web API project configured with Minimal APIs and C# 13.",
+    "Entity Framework Core DbContext and entities matching 07-data-model.md with PostgreSQL xmin concurrency token.",
+    "Global RFC 9457 ProblemDetails factory and exception handling middleware supporting custom errorCode and extensions.",
+    "Idempotency middleware utilizing Redis / EF Core idempotency store.",
+    "Built-in SlidingWindowRateLimiter middleware and OpenAPI/Swagger generator setup."
+  ]
+}
