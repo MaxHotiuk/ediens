@@ -1,9 +1,9 @@
 {
   "id": "QOL-04",
   "title": "Recipe Multi-Servings Scaling, Meal Type Dispatch & 1-Click Shortfall Purchase",
-  "status": "TODO",
-  "assigned_to": null,
-  "updated_at": "2026-10-31T21:30:00Z",
+  "status": "IN_PROGRESS",
+  "assigned_to": "voyager-ASUS",
+  "updated_at": "2026-10-31T22:41:43Z",
   "branch": "feat/QOL-04-recipe-servings-and-shortfall-purchase",
   "dependencies": [
     "FIX-07"
