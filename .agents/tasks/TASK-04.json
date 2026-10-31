@@ -1,9 +1,9 @@
 {
   "id": "TASK-04",
   "title": ".NET 10 Web API Backend Foundation and Infrastructure",
-  "status": "TODO",
-  "assigned_to": null,
-  "updated_at": null,
+  "status": "IN_PROGRESS",
+  "assigned_to": "voyager-ASUS",
+  "updated_at": "2026-10-31T08:04:53Z",
   "branch": "feat/TASK-04-dotnet-backend-foundation",
   "dependencies": [
     "TASK-01"
