@@ -1,9 +1,9 @@
 {
   "id": "FIX-02",
   "title": "Frontend API Client, Vite Proxy & De-Mocking Core",
-  "status": "IN_PROGRESS",
+  "status": "DONE",
   "assigned_to": "voyager-ASUS",
-  "updated_at": "2026-10-31T09:49:15Z",
+  "updated_at": "2026-10-31T09:57:21Z",
   "branch": "fix/FIX-02-frontend-api-client-and-proxy",
   "dependencies": [],
   "allowed_paths": [

@@ -17,11 +17,12 @@ import {
   ShoppingListItem,
   MealLog,
   StorageLocation,
+  FreshnessStatus,
 } from '../types/api';
 
-// Generates RFC 4122 v4 UUID for Idempotency-Key & traceparent
+// Generates RFC 4122 v4 UUID for Idempotency-Key & traceparent using crypto.randomUUID()
 export function generateUuid(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -31,15 +32,19 @@ export function generateUuid(): string {
   });
 }
 
-// Generates W3C TraceContext traceparent: 00-traceid-spanid-flags
+// Generates W3C TraceContext traceparent: 00-traceid-spanid-flags using crypto.randomUUID()
 function generateTraceparent(): string {
-  const traceId = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-  const spanId = Array.from({ length: 16 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+  const raw1 = generateUuid().replace(/-/g, '');
+  const raw2 = generateUuid().replace(/-/g, '');
+  const traceId = (raw1 + raw2).substring(0, 32);
+  const spanId = generateUuid().replace(/-/g, '').substring(0, 16);
   return `00-${traceId}-${spanId}-01`;
 }
 
 // Environment or default base API URL
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
+export const DEFAULT_HOUSEHOLD_ID =
+  import.meta.env.VITE_DEFAULT_HOUSEHOLD_ID || '0192e2b0-8812-7001-9011-aa9988776655';
 
 export const axiosInstance: AxiosInstance = axios.create({
   baseURL: BASE_URL,
@@ -50,16 +55,27 @@ export const axiosInstance: AxiosInstance = axios.create({
   },
 });
 
-// Request Interceptor: Attach Auth Token and W3C TraceContext
+// Request Interceptor: Attach Auth Token, W3C TraceContext, and Idempotency-Key
 axiosInstance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('ediens_access_token');
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('ediens_access_token') : null;
     if (token) {
       config.headers.set('Authorization', `Bearer ${token}`);
     }
 
+    // Attach W3C TraceContext traceparent using crypto.randomUUID()
     if (!config.headers.has('traceparent')) {
       config.headers.set('traceparent', generateTraceparent());
+    }
+
+    // Attach Idempotency-Key for mutating HTTP methods using crypto.randomUUID()
+    const method = config.method?.toUpperCase();
+    if (
+      (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') &&
+      !config.headers.has('Idempotency-Key') &&
+      !config.headers.has('idempotency-key')
+    ) {
+      config.headers.set('Idempotency-Key', generateUuid());
     }
 
     return config;
@@ -67,13 +83,19 @@ axiosInstance.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response Interceptor: Route all errors through RFC 9457 Error Handler
+// Response Interceptor: Route all errors through RFC 9457 Error Handler & extract ETag
 axiosInstance.interceptors.response.use(
   (response) => {
-    // If response contains an ETag, attach it to response data for convenience
-    const etag = response.headers['etag'] || response.headers['ETag'];
-    if (etag && response.data && typeof response.data === 'object' && !('etag' in response.data)) {
-      (response.data as Record<string, unknown>).etag = etag;
+    // If response contains an ETag, attach it to response data for Optimistic Concurrency Control
+    const etag =
+      response.headers['etag'] ||
+      response.headers['ETag'] ||
+      (typeof response.headers?.get === 'function' ? response.headers.get('etag') : undefined);
+
+    if (etag && response.data && typeof response.data === 'object') {
+      if (!('etag' in response.data) || !(response.data as Record<string, unknown>).etag) {
+        (response.data as Record<string, unknown>).etag = etag;
+      }
     }
     return response;
   },
@@ -82,6 +104,58 @@ axiosInstance.interceptors.response.use(
     return Promise.reject(apiError);
   }
 );
+
+// ============================================================================
+// DTO Interfaces
+// ============================================================================
+
+export interface CookRecipeRequestPayload {
+  householdId: string;
+  servings?: number;
+  mealType?: string;
+}
+
+export interface CookRecipeResponsePayload {
+  success: boolean;
+  recipeId: string;
+  mealLogId: string;
+  servingsCooked: number;
+  message?: string;
+  deductedBatches: Array<{
+    batchId: string;
+    productName: string;
+    deductedQuantity: number;
+    remainingQuantity: number;
+    unit: string;
+  }>;
+  loggedMacros: {
+    calories: number;
+    protein: number;
+    fat: number;
+    carbs: number;
+  };
+  consumedIngredients?: Array<{ productName: string; quantity: number; unit: string }>;
+}
+
+export interface ShoppingListClientChangePayload {
+  id: string;
+  productName: string;
+  quantity: number;
+  unit: string;
+  isPurchased: boolean;
+  clientUpdatedAt?: string;
+}
+
+export interface ShoppingListSyncRequestPayload {
+  lastSyncTimestamp: string;
+  clientChanges: ShoppingListClientChangePayload[];
+}
+
+export interface ShoppingListSyncResponsePayload {
+  householdId: string;
+  serverTimestamp: string;
+  items: ShoppingListItem[];
+}
 
 // ============================================================================
 // Type-Safe API Modules
@@ -100,10 +174,24 @@ export const ediensApi = {
     async getItems(params?: {
       householdId?: string;
       location?: StorageLocation;
+      status?: FreshnessStatus | string;
       sortBy?: 'expiresAt' | 'createdAt' | 'quantity';
     }): Promise<InventoryItem[]> {
-      const res = await axiosInstance.get<InventoryItem[]>('/inventory/items', { params });
-      return res.data;
+      const queryParams = {
+        householdId: params?.householdId || DEFAULT_HOUSEHOLD_ID,
+        ...params,
+      };
+      const res = await axiosInstance.get<{ items: InventoryItem[]; totalCount?: number; householdId?: string } | InventoryItem[]>(
+        '/inventory/items',
+        { params: queryParams }
+      );
+      if (res.data && typeof res.data === 'object' && 'items' in res.data && Array.isArray((res.data as any).items)) {
+        return (res.data as any).items;
+      }
+      if (Array.isArray(res.data)) {
+        return res.data;
+      }
+      return [];
     },
 
     async getItemById(id: string): Promise<InventoryItem> {
@@ -112,7 +200,11 @@ export const ediensApi = {
     },
 
     async addItem(item: CreateInventoryItemRequest): Promise<InventoryItem> {
-      const res = await axiosInstance.post<InventoryItem>('/inventory/items', item);
+      const payload = {
+        ...item,
+        householdId: item.householdId || DEFAULT_HOUSEHOLD_ID,
+      };
+      const res = await axiosInstance.post<InventoryItem>('/inventory/items', payload);
       return res.data;
     },
 
@@ -163,7 +255,17 @@ export const ediensApi = {
    */
   meals: {
     async logMeal(
-      meal: Omit<MealLog, 'id' | 'loggedAt'>,
+      meal:
+        | {
+            mealType: string;
+            items: Array<{
+              productId?: string;
+              productName: string;
+              quantity: number;
+              unit: string;
+            }>;
+          }
+        | Omit<MealLog, 'id' | 'loggedAt'>,
       idempotencyKey?: string
     ): Promise<MealLog> {
       const key = idempotencyKey || generateUuid();
@@ -171,6 +273,17 @@ export const ediensApi = {
         headers: { 'Idempotency-Key': key },
       });
       return res.data;
+    },
+
+    async getMeals(params?: { userId?: string; date?: string }): Promise<MealLog[]> {
+      const res = await axiosInstance.get<{ meals: MealLog[] } | MealLog[]>('/meals', { params });
+      if (res.data && typeof res.data === 'object' && 'meals' in res.data && Array.isArray((res.data as any).meals)) {
+        return (res.data as any).meals;
+      }
+      if (Array.isArray(res.data)) {
+        return res.data;
+      }
+      return [];
     },
   },
 
@@ -181,25 +294,56 @@ export const ediensApi = {
     async getRecommendations(params?: {
       householdId?: string;
       maxPrepMinutes?: number;
+      maxPrepTimeMinutes?: number;
+      limit?: number;
     }): Promise<Recipe[]> {
-      const res = await axiosInstance.get<Recipe[]>('/recipes/recommendations', { params });
-      return res.data;
+      const queryParams = {
+        householdId: params?.householdId || DEFAULT_HOUSEHOLD_ID,
+        maxPrepTimeMinutes: params?.maxPrepTimeMinutes ?? params?.maxPrepMinutes,
+        limit: params?.limit,
+      };
+      const res = await axiosInstance.get<{ recommendations: Recipe[] } | Recipe[]>('/recipes/recommendations', {
+        params: queryParams,
+      });
+      if (res.data && typeof res.data === 'object' && 'recommendations' in res.data && Array.isArray((res.data as any).recommendations)) {
+        return (res.data as any).recommendations;
+      }
+      if (Array.isArray(res.data)) {
+        return res.data;
+      }
+      return [];
     },
 
     async cookRecipe(
       recipeId: string,
+      requestOrKey?:
+        | {
+            householdId?: string;
+            servings?: number;
+            mealType?: string;
+          }
+        | string,
       idempotencyKey?: string
-    ): Promise<{
-      success: boolean;
-      mealLogId: string;
-      message: string;
-      consumedIngredients: Array<{ productName: string; quantity: number; unit: string }>;
-    }> {
-      const key = idempotencyKey || generateUuid();
-      const res = await axiosInstance.post(`/recipes/${recipeId}/cook`, {}, {
+    ): Promise<CookRecipeResponsePayload> {
+      const isKey = typeof requestOrKey === 'string';
+      const key = (isKey ? requestOrKey : idempotencyKey) || generateUuid();
+      const reqObj = (!isKey && typeof requestOrKey === 'object' ? requestOrKey : {}) as {
+        householdId?: string;
+        servings?: number;
+        mealType?: string;
+      };
+      const payload: CookRecipeRequestPayload = {
+        householdId: reqObj.householdId || DEFAULT_HOUSEHOLD_ID,
+        servings: reqObj.servings ?? 1,
+        mealType: reqObj.mealType || 'Dinner',
+      };
+      const res = await axiosInstance.post<CookRecipeResponsePayload>(`/recipes/${recipeId}/cook`, payload, {
         headers: { 'Idempotency-Key': key },
       });
-      return res.data;
+      return {
+        ...res.data,
+        success: res.data.success ?? true,
+      };
     },
   },
 
@@ -226,19 +370,68 @@ export const ediensApi = {
    * Shopping List Module
    */
   shoppingList: {
-    async getItems(householdId: string): Promise<ShoppingListItem[]> {
-      const res = await axiosInstance.get<ShoppingListItem[]>(`/households/${householdId}/shopping-list`);
-      return res.data;
+    async getItems(householdId?: string): Promise<ShoppingListItem[]> {
+      const id = householdId || DEFAULT_HOUSEHOLD_ID;
+      const res = await axiosInstance.get<{ items: ShoppingListItem[]; householdId?: string; serverTimestamp?: string } | ShoppingListItem[]>(
+        `/households/${id}/shopping-list`
+      );
+      if (res.data && typeof res.data === 'object' && 'items' in res.data && Array.isArray((res.data as any).items)) {
+        return (res.data as any).items;
+      }
+      if (Array.isArray(res.data)) {
+        return res.data;
+      }
+      return [];
     },
 
     async sync(
       householdId: string,
-      items: ShoppingListItem[]
+      request:
+        | {
+            lastSyncTimestamp?: string;
+            clientChanges?: ShoppingListClientChangePayload[];
+          }
+        | ShoppingListItem[]
     ): Promise<ShoppingListItem[]> {
-      const res = await axiosInstance.post<ShoppingListItem[]>(
-        `/households/${householdId}/shopping-list/sync`,
-        { items }
+      const id = householdId || DEFAULT_HOUSEHOLD_ID;
+      const payload: ShoppingListSyncRequestPayload = Array.isArray(request)
+        ? {
+            lastSyncTimestamp: new Date(0).toISOString(),
+            clientChanges: request.map((item) => ({
+              id: item.id,
+              productName: item.productName,
+              quantity: item.quantity,
+              unit: item.unit,
+              isPurchased: item.isPurchased,
+              clientUpdatedAt: item.updatedAt || new Date().toISOString(),
+            })),
+          }
+        : {
+            lastSyncTimestamp: request.lastSyncTimestamp || new Date(0).toISOString(),
+            clientChanges: request.clientChanges || [],
+          };
+
+      const res = await axiosInstance.post<ShoppingListSyncResponsePayload | ShoppingListItem[]>(
+        `/households/${id}/shopping-list/sync`,
+        payload
       );
+
+      if (res.data && typeof res.data === 'object' && 'items' in res.data && Array.isArray((res.data as any).items)) {
+        return (res.data as any).items;
+      }
+      if (Array.isArray(res.data)) {
+        return res.data;
+      }
+      return [];
+    },
+  },
+
+  /**
+   * Households Module
+   */
+  households: {
+    async getHouseholds(): Promise<Array<{ id: string; name: string; role?: string }>> {
+      const res = await axiosInstance.get<Array<{ id: string; name: string; role?: string }>>('/households');
       return res.data;
     },
   },
