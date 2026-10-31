@@ -1,9 +1,9 @@
 {
   "id": "FIX-03",
   "title": "End-to-End Fix: Inventory & Barcode Slices (Backend + Frontend)",
-  "status": "TODO",
-  "assigned_to": null,
-  "updated_at": "2026-10-31T11:45:00Z",
+  "status": "IN_PROGRESS",
+  "assigned_to": "Maxs-MacBook-Air",
+  "updated_at": "2026-10-31T10:02:39Z",
   "branch": "fix/FIX-03-e2e-inventory-and-barcode",
   "dependencies": [
     "FIX-01",
