@@ -124,6 +124,15 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
   fi
 else
   echo "  (Docker CLI not available on current host; performing structural syntax checks)"
+  if command -v ruby >/dev/null 2>&1; then
+    echo "  Validating compose and monitoring YAML structure via Ruby YAML parser..."
+    ruby -ryaml -e "
+      ['compose.yaml', 'compose.monitoring.yaml', 'infra/monitoring/prometheus/prometheus.yml', 'infra/monitoring/prometheus/alert_rules.yml', 'infra/monitoring/alertmanager/alertmanager.yml'].each do |file|
+        YAML.load_file(file)
+      end
+    "
+    echo "  ✓ Strict YAML AST validation passed."
+  fi
   # Verify key sections exist in compose.yaml
   for required_section in "services:" "postgres:" "redis:" "ediens-api:" "ediens-web:" "networks:" "volumes:"; do
     if ! grep -q "$required_section" compose.yaml; then
