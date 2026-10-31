@@ -4,7 +4,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Ediens.Api.Data;
 
 /// <summary>
-/// Головний контекст бази даних платформи ēdiens для PostgreSQL 17+.
+/// Головний контекст бази даних платформи ēdiens для PostgreSQL 17+ з підтримкою
+/// міграцій, оптимістичного блокування через xmin та Transactional Outbox.
 /// </summary>
 public class EdiensDbContext : DbContext
 {

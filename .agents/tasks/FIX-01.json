@@ -1,0 +1,29 @@
+{
+  "id": "FIX-01",
+  "title": "Backend Real DB Persistence, Seeding & CORS/Headers",
+  "status": "DONE",
+  "assigned_to": "Maxs-MacBook-Air",
+  "updated_at": "2026-10-31T10:01:46Z",
+  "branch": "fix/FIX-01-backend-db-and-cors",
+  "dependencies": [],
+  "allowed_paths": [
+    "src/Ediens.Api/Program.cs",
+    "src/Ediens.Api/Data/**",
+    "src/Ediens.Api/Middleware/**",
+    "src/Ediens.Api/Features/Common/**",
+    "src/Ediens.Api/appsettings*.json"
+  ],
+  "deliverables": [
+    "src/Ediens.Api/Program.cs",
+    "src/Ediens.Api/Data/EdiensDbContext.cs",
+    "src/Ediens.Api/Features/Common/DatabaseSeeder.cs",
+    "src/Ediens.Api/Middleware/EdiensExceptionHandlerMiddleware.cs"
+  ],
+  "acceptance_criteria": [
+    "CORS configured in Program.cs allowing Vite frontend origin (http://localhost:5173, http://localhost:80, http://localhost:3000) and any local development origin.",
+    "CORS explicitly exposes headers 'ETag', 'Retry-After', 'X-Correlation-Id', and 'Location' via WithExposedHeaders.",
+    "DatabaseSeeder seeds initial active InventoryItems for MainHouseholdId (at least 5 items with varying FEFO dates: expired, critical <24h, expiring soon, fresh) and base ShoppingList items so database starts populated.",
+    "EnsureCreated / migration strategy initializes PostgreSQL schema robustly on startup without silently swallowing critical DB connection errors.",
+    "RFC 9457 ProblemDetails middleware returns strict application/problem+json content-type with required fields: type, title, status, detail, instance, errorCode, traceId."
+  ]
+}

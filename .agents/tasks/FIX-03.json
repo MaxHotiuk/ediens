@@ -1,0 +1,32 @@
+{
+  "id": "FIX-03",
+  "title": "End-to-End Fix: Inventory & Barcode Slices (Backend + Frontend)",
+  "status": "DONE",
+  "assigned_to": "Maxs-MacBook-Air",
+  "updated_at": "2026-10-31T10:07:36Z",
+  "branch": "fix/FIX-03-e2e-inventory-and-barcode",
+  "dependencies": [
+    "FIX-01",
+    "FIX-02"
+  ],
+  "allowed_paths": [
+    "src/Ediens.Api/Features/Inventory/**",
+    "src/Ediens.Api/Features/Products/**",
+    "src/ediens-web/src/features/inventory/**"
+  ],
+  "deliverables": [
+    "src/Ediens.Api/Features/Inventory/InventoryEndpoints.cs",
+    "src/Ediens.Api/Features/Products/ProductEndpoints.cs",
+    "src/ediens-web/src/features/inventory/InventoryDashboard.tsx",
+    "src/ediens-web/src/features/inventory/AddInventoryModal.tsx",
+    "src/ediens-web/src/features/inventory/InventoryItemCard.tsx"
+  ],
+  "acceptance_criteria": [
+    "Delete all hardcoded mock arrays and localStorage inventory state from React inventory components.",
+    "InventoryDashboard queries live GET /api/v1/inventory/items?householdId=... via ediensApi.inventory.getItems and renders real DB items with FEFO status badges.",
+    "AddInventoryModal creates real items via POST /api/v1/inventory/items and supports EAN-13 barcode autofill via ediensApi.products.getByBarcode.",
+    "Consuming quantity sends PATCH /api/v1/inventory/items/{id} with If-Match ETag header.",
+    "When a concurrent modification occurs (409 Conflict), the UI captures the ProblemDetails response and triggers ConflictResolutionModal with actual server quantity.",
+    "Deleting an inventory batch issues real DELETE /api/v1/inventory/items/{id}."
+  ]
+}

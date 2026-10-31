@@ -29,7 +29,7 @@ import json
 import os
 import sys
 
-tasks = sorted(glob.glob(".agents/tasks/TASK-*.json"))
+tasks = sorted(glob.glob(".agents/tasks/TASK-*.json") + glob.glob(".agents/tasks/FIX-*.json"))
 all_tasks = {}
 for path in tasks:
     with open(path, "r", encoding="utf-8") as f:

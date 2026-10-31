@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { NutritionTargets, MacroProgress, MealLog, MealType, MeasurementUnit } from '../../types/api';
-import { ediensStore } from '../store/mockStore';
+import { ediensApi, EdiensApiError } from '../../api/client';
 import { MacroRing } from '../../components/ui/MacroRing';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -13,32 +13,66 @@ export interface MacroTrackerViewProps {
   onShowToast: (title: string, desc: string, variant?: 'info' | 'success' | 'warning' | 'error') => void;
 }
 
+const defaultProgress: MacroProgress = {
+  calories: { current: 0, target: 2200, remaining: 2200 },
+  protein: { current: 0, target: 160, remaining: 160 },
+  fat: { current: 0, target: 65, remaining: 65 },
+  carbs: { current: 0, target: 240, remaining: 240 },
+};
+
+const defaultTargets: NutritionTargets = {
+  targetCalories: 2200,
+  targetProtein: 160,
+  targetFat: 65,
+  targetCarbs: 240,
+};
+
 export function MacroTrackerView({ onShowToast }: MacroTrackerViewProps) {
-  const [targets, setTargets] = useState<NutritionTargets>(() => ediensStore.getNutritionTargets());
-  const [progress, setProgress] = useState<MacroProgress>(() => ediensStore.getMacroProgress());
-  const [meals, setMeals] = useState<MealLog[]>(() => ediensStore.getMealLogs());
+  const [targets, setTargets] = useState<NutritionTargets>(defaultTargets);
+  const [progress, setProgress] = useState<MacroProgress>(defaultProgress);
+  const [meals, setMeals] = useState<MealLog[]>([]);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
-  const refreshState = () => {
-    setTargets(ediensStore.getNutritionTargets());
-    setProgress(ediensStore.getMacroProgress());
-    setMeals(ediensStore.getMealLogs());
-  };
+  const loadData = useCallback(async () => {
+    try {
+      const [targetsData, progressData, mealsData] = await Promise.all([
+        ediensApi.nutrition.getTargets(),
+        ediensApi.nutrition.getProgress(),
+        ediensApi.meals.getMeals(),
+      ]);
+
+      if (targetsData) {
+        setTargets(targetsData);
+      }
+      if (progressData) {
+        setProgress(progressData);
+      }
+      if (mealsData) {
+        setMeals(mealsData);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Не вдалося завантажити макро-профіль із сервера';
+      onShowToast('Помилка завантаження', msg, 'error');
+    }
+  }, [onShowToast]);
 
   useEffect(() => {
-    refreshState();
-    const unsub = ediensStore.subscribe(() => {
-      refreshState();
-    });
-    return unsub;
-  }, []);
+    loadData();
+  }, [loadData]);
 
-  const handleSaveTargets = (newTargets: NutritionTargets) => {
-    ediensStore.updateNutritionTargets(newTargets);
-    onShowToast('Цілі оновлено', 'Добові норми КБЖВ успішно збережено в профіль.', 'success');
+  const handleSaveTargets = async (newTargets: NutritionTargets) => {
+    try {
+      const updated = await ediensApi.nutrition.updateTargets(newTargets);
+      setTargets(updated);
+      onShowToast('Цілі оновлено', 'Добові норми КБЖВ успішно збережено в профіль.', 'success');
+      await loadData();
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка збереження цілей';
+      onShowToast('Помилка', msg, 'error');
+    }
   };
 
-  const handleLogMeal = (mealData: {
+  const handleLogMeal = async (mealData: {
     mealType: MealType;
     productName: string;
     quantity: number;
@@ -49,32 +83,46 @@ export function MacroTrackerView({ onShowToast }: MacroTrackerViewProps) {
     carbs: number;
     idempotencyKey: string;
   }) => {
-    ediensStore.logMeal({
-      userId: 'user-oleg-01',
-      mealType: mealData.mealType,
-      calories: mealData.calories,
-      protein: mealData.protein,
-      fat: mealData.fat,
-      carbs: mealData.carbs,
-      idempotencyKey: mealData.idempotencyKey,
-      items: [
+    try {
+      const response = await ediensApi.meals.logMeal(
         {
-          productName: mealData.productName,
-          quantity: mealData.quantity,
-          unit: mealData.unit,
+          mealType: mealData.mealType,
+          items: [
+            {
+              productName: mealData.productName,
+              quantity: mealData.quantity,
+              unit: mealData.unit,
+            },
+          ],
         },
-      ],
-    });
-    onShowToast(
-      'Прийом їжі збережено',
-      `+${mealData.calories} ккал додано. Залишок перераховано атомарно.`,
-      'success'
-    );
+        mealData.idempotencyKey
+      );
+
+      onShowToast(
+        'Прийом їжі збережено',
+        `+${response.calories} ккал додано. Залишок перераховано атомарно.`,
+        'success'
+      );
+      await loadData();
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка збереження прийому їжі';
+      onShowToast('Помилка логування', msg, 'error');
+    }
   };
 
-  const handleDeleteMeal = (id: string) => {
-    ediensStore.deleteMealLog(id);
-    onShowToast('Запис видалено', 'Калорії та макроси повернено до доступного бюджету.', 'info');
+  const handleDeleteMeal = async (id: string) => {
+    try {
+      const res = await fetch(`/api/v1/meals/${id}`, { method: 'DELETE' });
+      if (!res.ok && res.status !== 404) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      setMeals((prev) => prev.filter((m) => m.id !== id));
+      onShowToast('Запис видалено', 'Калорії та макроси повернено до доступного бюджету.', 'info');
+      await loadData();
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка видалення запису';
+      onShowToast('Помилка', msg, 'error');
+    }
   };
 
   return (
@@ -106,11 +154,11 @@ export function MacroTrackerView({ onShowToast }: MacroTrackerViewProps) {
             size="sm"
             icon={<RotateCcw className="h-3.5 w-3.5" />}
             onClick={() => {
-              ediensStore.resetAllToSeed();
-              onShowToast('Скинуто', 'Макроси скинуто до початкових тестових значень.', 'info');
+              loadData();
+              onShowToast('Оновлено', 'Дані КБЖВ синхронізовано із сервером.', 'info');
             }}
           >
-            Скинути
+            Оновити
           </Button>
         </div>
       </div>

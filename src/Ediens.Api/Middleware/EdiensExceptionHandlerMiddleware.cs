@@ -27,6 +27,40 @@ public class EdiensExceptionHandlerMiddleware
         try
         {
             await _next(context);
+
+            if (!context.Response.HasStarted)
+            {
+                if (context.Response.StatusCode == StatusCodes.Status404NotFound)
+                {
+                    var notFoundProblem = new EdiensProblemDetails
+                    {
+                        Type = "https://ediens.app/errors/item-not-found",
+                        Title = "Resource does not exist or was deleted.",
+                        Status = StatusCodes.Status404NotFound,
+                        Detail = $"The requested endpoint or resource '{context.Request.Path}' was not found.",
+                        Instance = context.Request.Path,
+                        ErrorCode = ErrorCodes.ItemNotFound,
+                        TraceId = Activity.Current?.Id ?? context.TraceIdentifier,
+                        Timestamp = DateTime.UtcNow.ToString("O")
+                    };
+                    await WriteProblemResponseAsync(context, StatusCodes.Status404NotFound, notFoundProblem);
+                }
+                else if (context.Response.StatusCode == StatusCodes.Status405MethodNotAllowed)
+                {
+                    var methodProblem = new EdiensProblemDetails
+                    {
+                        Type = "https://ediens.app/errors/validation-failed",
+                        Title = "HTTP Method Not Allowed",
+                        Status = StatusCodes.Status405MethodNotAllowed,
+                        Detail = $"HTTP {context.Request.Method} method is not allowed on '{context.Request.Path}'.",
+                        Instance = context.Request.Path,
+                        ErrorCode = ErrorCodes.ValidationFailed,
+                        TraceId = Activity.Current?.Id ?? context.TraceIdentifier,
+                        Timestamp = DateTime.UtcNow.ToString("O")
+                    };
+                    await WriteProblemResponseAsync(context, StatusCodes.Status405MethodNotAllowed, methodProblem);
+                }
+            }
         }
         catch (DbUpdateConcurrencyException ex)
         {
@@ -40,10 +74,33 @@ public class EdiensExceptionHandlerMiddleware
         {
             await HandleBadRequestExceptionAsync(context, ex);
         }
+        catch (JsonException ex)
+        {
+            await HandleJsonExceptionAsync(context, ex);
+        }
         catch (Exception ex)
         {
             await HandleGenericExceptionAsync(context, ex);
         }
+    }
+
+    private async Task HandleJsonExceptionAsync(HttpContext context, JsonException ex)
+    {
+        _logger.LogWarning(ex, "Malformed JSON payload at {Path}", context.Request.Path);
+
+        var problem = new EdiensProblemDetails
+        {
+            Type = "https://ediens.app/errors/validation-failed",
+            Title = "Bad Request - Invalid JSON Payload",
+            Status = StatusCodes.Status400BadRequest,
+            Detail = ex.Message,
+            Instance = context.Request.Path,
+            ErrorCode = ErrorCodes.ValidationFailed,
+            TraceId = Activity.Current?.Id ?? context.TraceIdentifier,
+            Timestamp = DateTime.UtcNow.ToString("O")
+        };
+
+        await WriteProblemResponseAsync(context, StatusCodes.Status400BadRequest, problem);
     }
 
     private async Task HandleConcurrencyExceptionAsync(HttpContext context, DbUpdateConcurrencyException ex)

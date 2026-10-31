@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Recipe, InsufficientInventoryExtensions } from '../../types/api';
-import { ediensStore } from '../store/mockStore';
+import { ediensApi, DEFAULT_HOUSEHOLD_ID, EdiensApiError, generateUuid } from '../../api/client';
 import { RecipeCard } from './RecipeCard';
 import { MissingIngredientsModal } from './MissingIngredientsModal';
-import { Sparkles, ShieldCheck, Zap } from 'lucide-react';
+import { Sparkles, ShieldCheck, Zap, RefreshCw } from 'lucide-react';
 
 export interface RecipeRecommendationViewProps {
   onShowToast: (title: string, desc: string, variant?: 'info' | 'success' | 'warning' | 'error') => void;
@@ -14,8 +14,9 @@ export function RecipeRecommendationView({
   onShowToast,
   onNavigateToShoppingList,
 }: RecipeRecommendationViewProps) {
-  const [recipes, setRecipes] = useState<Recipe[]>(() => ediensStore.getRecipes());
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [filterMode, setFilterMode] = useState<'all' | 'available' | 'quick' | 'highProtein'>('all');
+  const [isLoading, setIsLoading] = useState(false);
 
   // 422 Missing Ingredients Modal State
   const [missingModalData, setMissingModalData] = useState<{
@@ -23,56 +24,83 @@ export function RecipeRecommendationView({
     missingIngredients: InsufficientInventoryExtensions['missingIngredients'];
   } | null>(null);
 
-  const loadRecipes = () => {
-    setRecipes(ediensStore.getRecipes());
-  };
+  const loadRecipes = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await ediensApi.recipes.getRecommendations({ householdId: DEFAULT_HOUSEHOLD_ID });
+      setRecipes(data);
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Не вдалося завантажити рекомендації рецептів';
+      onShowToast('Помилка', msg, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [onShowToast]);
 
   useEffect(() => {
     loadRecipes();
-    const unsub = ediensStore.subscribe(() => {
-      loadRecipes();
-    });
-    return unsub;
-  }, []);
+  }, [loadRecipes]);
 
-  const handleCook = (recipe: Recipe) => {
-    const result = ediensStore.cookRecipe(recipe.id);
+  const handleCook = async (recipe: Recipe) => {
+    try {
+      const result = await ediensApi.recipes.cookRecipe(recipe.id, {
+        householdId: DEFAULT_HOUSEHOLD_ID,
+        servings: 1,
+        mealType: 'Dinner',
+      });
 
-    if (result.success) {
       onShowToast(
         '1-Click Cook виконано!',
-        `Страву «${recipe.title}» приготовано. Інгредієнти списано зі складу за FEFO, а КБЖВ (+${recipe.totalCalories} ккал, +${recipe.totalProtein}г білка) додано до щоденника.`,
+        `Страву «${recipe.title}» приготовано. Інгредієнти списано зі складу за FEFO, а КБЖВ (+${result?.loggedMacros?.calories ?? recipe.totalCalories} ккал, +${result?.loggedMacros?.protein ?? recipe.totalProtein}г білка) додано до щоденника.`,
         'success'
       );
-    } else if (result.missingIngredients && result.missingIngredients.length > 0) {
-      // 422 reaction modal
-      setMissingModalData({
-        recipeTitle: recipe.title,
-        missingIngredients: result.missingIngredients,
-      });
+      await loadRecipes();
+    } catch (err: unknown) {
+      if (err instanceof EdiensApiError && err.status === 422) {
+        const ext = err.problem?.extensions as Record<string, unknown> | undefined;
+        const missing = (ext?.missingIngredients || []) as InsufficientInventoryExtensions['missingIngredients'];
+        setMissingModalData({
+          recipeTitle: recipe.title,
+          missingIngredients: missing,
+        });
+      } else {
+        const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка виконання 1-Click Cook';
+        onShowToast('Помилка', msg, 'error');
+      }
     }
   };
 
-  const handleAddToShoppingList = (
+  const handleAddToShoppingList = async (
     missing: InsufficientInventoryExtensions['missingIngredients']
   ) => {
-    const itemsToAdd = missing.map((m) => ({
-      productName: m.productName,
-      quantity: Math.max(1, m.requiredQuantity - (m.availableQuantity || 0)),
-      unit: m.unit,
-    }));
+    try {
+      const clientChanges = missing.map((m) => ({
+        id: generateUuid(),
+        productName: m.productName,
+        quantity: Math.max(1, m.requiredQuantity - (m.availableQuantity || 0)),
+        unit: m.unit,
+        isPurchased: false,
+        clientUpdatedAt: new Date().toISOString(),
+      }));
 
-    ediensStore.addMultipleShoppingItems(itemsToAdd);
-    onShowToast(
-      'Додано до списку покупок',
-      `${itemsToAdd.length} інгредієнт(ів) успішно внесено до списку покупок домогосподарства.`,
-      'success'
-    );
+      await ediensApi.shoppingList.sync(DEFAULT_HOUSEHOLD_ID, {
+        clientChanges,
+      });
+
+      onShowToast(
+        'Додано до списку покупок',
+        `${missing.length} інгредієнт(ів) успішно внесено до списку покупок домогосподарства.`,
+        'success'
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка додавання до списку покупок';
+      onShowToast('Помилка', msg, 'error');
+    }
   };
 
   const filteredRecipes = recipes.filter((r) => {
     if (filterMode === 'available') {
-      return r.ingredients.every((ing) => ing.isAvailable);
+      return (r.ingredients || []).every((ing) => ing.isAvailable);
     }
     if (filterMode === 'quick') {
       return r.prepTimeMinutes <= 15;
@@ -102,6 +130,15 @@ export function RecipeRecommendationView({
             <ShieldCheck className="h-4 w-4 text-emerald-400" />
             <span>Транзакційне списання FEFO</span>
           </div>
+          <button
+            type="button"
+            onClick={() => loadRecipes()}
+            disabled={isLoading}
+            className="p-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white transition-colors"
+            title="Оновити рекомендації"
+          >
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin text-amber-400' : ''}`} />
+          </button>
         </div>
       </div>
 

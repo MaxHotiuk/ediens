@@ -183,3 +183,26 @@
 - `shopping_list_items`: ID, household_id, product_name, quantity, unit, is_purchased, added_by_user_id, updated_at.
 - `outbox_messages`: ID, event_type, payload (JSONB), status (`PENDING`, `PROCESSED`, `FAILED`), created_at, processed_at.
 - `idempotency_records`: idempotency_key (PK), request_path, status_code, response_body, created_at.
+
+---
+
+## 6. ZERO-FALLBACK & REAL INTEGRATION POLICY
+
+### 6.1 Strictly Forbidden
+1. **No Fake Data Arrays or Hardcoded States:**
+   - Under NO circumstances are agents permitted to add or retain mock data arrays (e.g. `MOCK_*`, `SEED_*` in UI store, `initialData`, `fallbackData`), fake `setTimeout` promises simulating latency, or in-memory fake stores in `src/ediens-web/src/features/` or `src/ediens-web/src/pages/`.
+   - All components must receive and display live data fetched through the type-safe client in `src/ediens-web/src/api/client.ts`.
+2. **No Swallowed Catch Blocks Returning Fake Data:**
+   - Patterns like `catch (err) { return defaultItems; }` or returning hardcoded fallback arrays when an HTTP call fails are **strictly forbidden**.
+   - If the .NET API is unavailable, network fails, or returns `4xx/5xx`, the UI MUST surface the real error via the RFC 9457 Problem Details error handler (`parseProblemDetails` / `errorBus`), displaying real error toasts, banners, or field-level validation errors parsed directly from the server's `application/problem+json` payload.
+3. **No In-Memory Fake Repositories in Backend:**
+   - NO in-memory `List<T>` or fake service stubs in `src/Ediens.Api`. Every single endpoint MUST query and mutate the real database via EF Core `EdiensDbContext`.
+   - Essential reference and test data (standard users, households, barcodes, and base recipes/inventory) MUST be seeded in the real database on startup via EF Core `DatabaseSeeder.SeedAsync`.
+
+### 6.2 Definition of Done (DoD) for FIX-* Tasks
+A task (`FIX-01` to `FIX-06`) is considered **DONE** and may be marked as such in `.agents/tasks/FIX-XX.json` ONLY when all of the following are met:
+1. **Real HTTP Execution:** The agent boots the .NET backend and verifies real HTTP requests against live endpoints via `curl`, `scripts/smoke-test.sh`, or automated integration tests.
+2. **Database Persistence:** Mutating endpoints (`POST`, `PUT`, `PATCH`, `DELETE`) are proven to persist data in the PostgreSQL database and survive across re-queries.
+3. **Frontend Renders Live Payload:** The React frontend displays the exact payload returned by the .NET API with zero hardcoded mocks, fake delays, or simulated fallback states.
+4. **Verification Gate Passes:** The updated `./scripts/verify.sh` passes with exit code 0, verifying build integrity, unit/integration test suites, and the static anti-mock gate.
+

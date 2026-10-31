@@ -351,6 +351,60 @@ paths:
         '409':
           $ref: '#/components/responses/409IdempotencyConflict'
 
+  /meals:
+    get:
+      operationId: getMealLogs
+      summary: Отримати щоденник прийомів їжі
+      description: |
+        Повертає історію залогованих прийомів їжі користувача за обраний день або останні записи.
+      tags:
+        - Nutrition
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Список прийомів їжі успішно отримано.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MealLogListResponse'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+
+  /meals/{id}:
+    delete:
+      operationId: deleteMealLog
+      summary: Видалити запис прийому їжі
+      description: |
+        Видаляє залогований прийом їжі та повертає використані макроси до доступного щоденного бюджету.
+      tags:
+        - Nutrition
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Запис успішно видалено.
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '404':
+          $ref: '#/components/responses/404ItemNotFound'
+
   # ---------------------------------------------------------------------------
   # 6. PUT /nutrition/targets — Встановлення добових цілей КБЖВ (FR-04)
   # ---------------------------------------------------------------------------
@@ -399,6 +453,54 @@ paths:
                     updatedAt: "2026-10-31T08:35:00Z"
         '400':
           $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+    get:
+      operationId: getNutritionTargets
+      summary: Отримати поточний цільовий профіль КБЖВ користувача
+      description: |
+        Повертає діючий на поточну дату цільовий профіль КБЖВ для розрахунку залишку добового бюджету.
+      tags:
+        - Nutrition
+      responses:
+        '200':
+          description: Цільовий профіль КБЖВ успішно отримано.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NutritionTargetsResponse'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+
+  /nutrition/progress:
+    get:
+      operationId: getMacroProgress
+      summary: Отримати щоденний прогрес споживання макронутрієнтів та залишок бюджету
+      description: |
+        Розраховує спожиті калорії та макроси за вказану дату на основі збережених прийомів їжі (MealLog)
+        та зіставляє їх із встановленими цілями користувача.
+      tags:
+        - Nutrition
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Прогрес споживання макронутрієнтів успішно розраховано.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacroProgressResponse'
         '401':
           $ref: '#/components/responses/401Unauthorized'
 
@@ -669,6 +771,86 @@ paths:
                         updatedAt: "2026-10-31T08:15:00Z"
         '400':
           $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+
+  /households:
+    get:
+      operationId: getHouseholds
+      summary: Отримати список домогосподарств користувача
+      description: |
+        Повертає перелік домогосподарств, до яких належить автентифікований користувач, разом із ролями.
+      tags:
+        - Households
+      responses:
+        '200':
+          description: Список домогосподарств успішно отримано.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HouseholdSummaryResponse'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+
+  /households/{id}/shopping-list:
+    get:
+      operationId: getShoppingList
+      summary: Отримати поточний список покупок домогосподарства
+      description: |
+        Повертає актуальний спільний список покупок домогосподарства.
+      tags:
+        - ShoppingList
+      parameters:
+        - $ref: '#/components/parameters/HouseholdIdPath'
+      responses:
+        '200':
+          description: Список покупок успішно отримано.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShoppingListSyncResponse'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+
+  /households/{id}/shopping-list/items/{itemId}:
+    delete:
+      operationId: deleteShoppingListItem
+      summary: Видалити товар зі списку покупок
+      tags:
+        - ShoppingList
+      parameters:
+        - $ref: '#/components/parameters/HouseholdIdPath'
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Товар успішно видалено.
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+
+  /households/{id}/shopping-list/purchased:
+    delete:
+      operationId: clearPurchasedShoppingListItems
+      summary: Очистити придбані товари зі списку покупок
+      tags:
+        - ShoppingList
+      parameters:
+        - $ref: '#/components/parameters/HouseholdIdPath'
+      responses:
+        '204':
+          description: Придбані товари успішно видалено.
         '401':
           $ref: '#/components/responses/401Unauthorized'
         '403':
@@ -1356,6 +1538,200 @@ components:
           type: string
           format: date-time
           example: "2026-10-31T08:35:00Z"
+
+    MacroProgressItem:
+      type: object
+      required:
+        - current
+        - target
+        - remaining
+      properties:
+        current:
+          type: number
+          example: 520.0
+        target:
+          type: number
+          example: 2200.0
+        remaining:
+          type: number
+          example: 1680.0
+
+    MacroPercentages:
+      type: object
+      required:
+        - calories
+        - protein
+        - fat
+        - carbs
+      properties:
+        calories:
+          type: number
+          example: 23.6
+        protein:
+          type: number
+          example: 30.0
+        fat:
+          type: number
+          example: 12.3
+        carbs:
+          type: number
+          example: 25.8
+
+    MacroProgressResponse:
+      type: object
+      required:
+        - calories
+        - protein
+        - fat
+        - carbs
+        - remainingCalories
+        - remainingProtein
+        - percentages
+      properties:
+        calories:
+          $ref: '#/components/schemas/MacroProgressItem'
+        protein:
+          $ref: '#/components/schemas/MacroProgressItem'
+        fat:
+          $ref: '#/components/schemas/MacroProgressItem'
+        carbs:
+          $ref: '#/components/schemas/MacroProgressItem'
+        remainingCalories:
+          type: number
+          example: 1680.0
+        remainingProtein:
+          type: number
+          example: 112.0
+        percentages:
+          $ref: '#/components/schemas/MacroPercentages'
+
+    MealLogItemDto:
+      type: object
+      required:
+        - id
+        - productName
+        - quantity
+        - unit
+        - calories
+        - protein
+        - fat
+        - carbs
+      properties:
+        id:
+          type: string
+          format: uuid
+        productId:
+          type: string
+          format: uuid
+        productName:
+          type: string
+          example: "Куряче філе"
+        quantity:
+          type: number
+          example: 200.0
+        unit:
+          type: string
+          example: "g"
+        calories:
+          type: number
+          example: 240.0
+        protein:
+          type: number
+          example: 48.0
+        fat:
+          type: number
+          example: 4.0
+        carbs:
+          type: number
+          example: 0.0
+
+    MealLogDetailDto:
+      type: object
+      required:
+        - id
+        - userId
+        - mealType
+        - loggedAt
+        - calories
+        - protein
+        - fat
+        - carbs
+        - items
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        mealType:
+          $ref: '#/components/schemas/MealType'
+        loggedAt:
+          type: string
+          format: date-time
+        calories:
+          type: number
+          example: 342.0
+        protein:
+          type: number
+          example: 14.8
+        fat:
+          type: number
+          example: 8.2
+        carbs:
+          type: number
+          example: 52.4
+        idempotencyKey:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MealLogItemDto'
+
+    MealLogListResponse:
+      type: object
+      required:
+        - meals
+      properties:
+        meals:
+          type: array
+          items:
+            $ref: '#/components/schemas/MealLogDetailDto'
+
+    HouseholdSummaryResponse:
+      type: object
+      required:
+        - id
+        - name
+        - inviteCode
+        - role
+        - membersCount
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192e2b0-8812-7001-9011-aa9988776655
+        name:
+          type: string
+          example: "Сім'я на Подолі"
+        inviteCode:
+          type: string
+          example: "PODIL-2026"
+        role:
+          type: string
+          example: "Owner"
+        membersCount:
+          type: integer
+          example: 2
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
 
     # -------------------------------------------------------------------------
     # Recipe Recommendations & 1-Click Cook Schemas
