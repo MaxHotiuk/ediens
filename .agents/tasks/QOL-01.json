@@ -1,9 +1,9 @@
 {
   "id": "QOL-01",
   "title": "Shopping List to Inventory Transfer Workflow & Bought Product Synchronization",
-  "status": "IN_PROGRESS",
+  "status": "DONE",
   "assigned_to": "Maxs-MacBook-Air",
-  "updated_at": "2026-10-31T21:43:08Z",
+  "updated_at": "2026-10-31T21:50:00Z",
   "branch": "feat/QOL-01-shopping-to-inventory-transfer",
   "dependencies": [
     "FIX-07"
@@ -20,8 +20,10 @@
     "src/Ediens.Api/Features/ShoppingList/ShoppingListEndpoints.cs",
     "src/Ediens.Api/Features/ShoppingList/ShoppingListModels.cs",
     "src/ediens-web/src/features/shopping/ShoppingListView.tsx",
+    "src/ediens-web/src/features/shopping/TransferReviewModal.tsx",
     "src/ediens-web/src/api/client.ts",
-    "src/Ediens.Tests/ShoppingListAndNutritionTests.cs"
+    "src/Ediens.Tests/ShoppingListAndNutritionTests.cs",
+    "docs/Ediens_OpenAPI.yaml"
   ],
   "acceptance_criteria": [
     "Implement backend endpoint POST /api/v1/households/{id}/shopping-list/transfer-to-inventory that atomically transfers purchased shopping list items into PostgreSQL InventoryItems for the household.",

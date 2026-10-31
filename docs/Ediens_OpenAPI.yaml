@@ -856,6 +856,86 @@ paths:
         '403':
           $ref: '#/components/responses/403HouseholdAccessDenied'
 
+  /households/{id}/shopping-list/transfer-to-inventory:
+    post:
+      operationId: transferShoppingListToInventory
+      summary: Атомарно перенести куплені товари зі списку покупок в інвентар домогосподарства
+      description: |
+        Транзакційно створює складські партії (InventoryItems) у PostgreSQL на основі придбаних товарів зі списку покупок
+        та одночасно видаляє їх зі списку покупок. Автоматично підбирає оптимальне місце зберігання та термін придатності
+        на основі назви/категорії продукту або застосовує надані користувачем перекриття (overrides).
+      tags:
+        - ShoppingList
+      parameters:
+        - $ref: '#/components/parameters/HouseholdIdPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  description: Список товарів для перенесення з опціональними налаштуваннями
+                  items:
+                    type: object
+                    required:
+                      - itemId
+                    properties:
+                      itemId:
+                        type: string
+                        format: uuid
+                      location:
+                        type: string
+                        enum: [Fridge, Freezer, Pantry]
+                      expiresAt:
+                        type: string
+                        format: date-time
+                      quantity:
+                        type: number
+                      unit:
+                        type: string
+                        enum: [g, ml, pcs]
+      responses:
+        '200':
+          description: Товари успішно перенесено в інвентар.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transferredCount:
+                    type: integer
+                  transferredItems:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        productId:
+                          type: string
+                          format: uuid
+                        productName:
+                          type: string
+                        location:
+                          type: string
+                        quantity:
+                          type: number
+                        unit:
+                          type: string
+                        expiresAt:
+                          type: string
+                          format: date-time
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+
 # =============================================================================
 # COMPONENTS: Parameters, Headers, Schemas, and Error Responses
 # =============================================================================
