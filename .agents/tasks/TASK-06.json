@@ -1,9 +1,9 @@
 {
   "id": "TASK-06",
   "title": ".NET 10 API Feature Endpoints Implementation and Concurrency Tests",
-  "status": "TODO",
-  "assigned_to": null,
-  "updated_at": null,
+  "status": "IN_PROGRESS",
+  "assigned_to": "voyager-ASUS",
+  "updated_at": "2026-10-31T08:22:33Z",
   "branch": "feat/TASK-06-dotnet-api-endpoints-and-tests",
   "dependencies": [
     "TASK-03",
