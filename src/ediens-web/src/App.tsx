@@ -1,63 +1,66 @@
 import { useState, useEffect } from 'react';
 import {
   Button,
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-  Badge,
-  FreshnessBadge,
-  Input,
-  FormField,
-  FormLabel,
-  FormError,
   Modal,
-  MacroRing,
-  ConflictResolutionModal,
   RateLimitBanner,
   ToastContainer,
   ToastMessage,
+  ConflictResolutionModal,
 } from './components/ui';
 import {
-  AlertCircle,
-  Flame,
-  Layers,
-  Package,
-  RefreshCw,
-  ShieldAlert,
+  Refrigerator,
+  Activity,
   Sparkles,
-  UtensilsCrossed,
+  ShoppingCart,
+  ShieldAlert,
+  Wifi,
+  WifiOff,
+  Home,
+  CheckCircle,
 } from 'lucide-react';
-import { errorBus, ErrorListeners } from './api/errorHandler';
+import { ErrorListeners } from './api/errorHandler';
 import { generateUuid } from './api/client';
-import { ProblemDetails } from './types/api';
+import { ediensStore } from './features/store/mockStore';
+
+// Page Views
+import { InventoryPage } from './pages/InventoryPage';
+import { MacroTrackerPage } from './pages/MacroTrackerPage';
+import { RecipesPage } from './pages/RecipesPage';
+import { ShoppingListPage } from './pages/ShoppingListPage';
+
+type TabView = 'inventory' | 'macros' | 'recipes' | 'shopping' | 'testbench';
 
 export function App() {
-  // Toasts
+  // Navigation / Router State
+  const [activeTab, setActiveTab] = useState<TabView>(() => {
+    const hash = window.location.hash.replace('#', '') as TabView;
+    if (['inventory', 'macros', 'recipes', 'shopping', 'testbench'].includes(hash)) {
+      return hash;
+    }
+    return 'inventory';
+  });
+
+  // Global Toasts
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Rate Limiting simulation
+  // Rate Limiting RFC 9457
   const [rateLimitSeconds, setRateLimitSeconds] = useState<number>(0);
 
-  // 409 Conflict Modal
-  const [isConflictOpen, setIsConflictOpen] = useState(false);
+  // 409 Conflict Modal State from global errorBus
+  const [globalConflict, setGlobalConflict] = useState<{
+    itemName: string;
+    attemptedQuantity: number;
+    currentServerQuantity: number;
+    unit: string;
+    currentETag?: string;
+  } | null>(null);
 
-  // Generic Demo Modal
-  const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
+  // Spec Info Modal
+  const [isSpecModalOpen, setIsSpecModalOpen] = useState(false);
 
-  // Form error simulation for 400 VALIDATION_FAILED
-  const [formQuantity, setFormQuantity] = useState<string>('500');
-  const [formError, setFormError] = useState<string | null>(null);
-
-  // Simulated Macro Progress
-  const [macroData, setMacroData] = useState({
-    calories: { current: 1680, target: 2200 },
-    protein: { current: 135, target: 160 },
-    fat: { current: 52, target: 70 },
-    carbs: { current: 165, target: 230 },
-  });
+  // Connectivity state from store
+  const [isOffline, setIsOffline] = useState(ediensStore.getOfflineMode());
+  const [offlineChanges, setOfflineChanges] = useState(ediensStore.getOfflineChangesCount());
 
   const addToast = (toast: Omit<ToastMessage, 'id'>) => {
     const id = generateUuid();
@@ -68,23 +71,56 @@ export function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Subscribe to errorBus events according to RFC 9457 reaction matrix
+  // Sync hash routing
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '') as TabView;
+      if (['inventory', 'macros', 'recipes', 'shopping', 'testbench'].includes(hash)) {
+        setActiveTab(hash);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  const switchTab = (tab: TabView) => {
+    setActiveTab(tab);
+    window.location.hash = tab;
+  };
+
+  // Subscribe to central store updates
+  useEffect(() => {
+    const unsub = ediensStore.subscribe(() => {
+      setIsOffline(ediensStore.getOfflineMode());
+      setOfflineChanges(ediensStore.getOfflineChangesCount());
+    });
+    return unsub;
+  }, []);
+
+  // Subscribe to errorBus RFC 9457 reactions
   useEffect(() => {
     const unsubs = [
       ErrorListeners.onRateLimitExceeded((data) => {
         setRateLimitSeconds(data.retryAfterSeconds);
         addToast({
           title: '429 Rate Limit Exceeded',
-          description: `Кулдаун активовано на ${data.retryAfterSeconds} секунд.`,
+          description: `Запит тимчасово призупинено на ${data.retryAfterSeconds}с.`,
           variant: 'warning',
         });
       }),
 
       ErrorListeners.onConcurrentModification((problem) => {
-        setIsConflictOpen(true);
+        const ext = problem.extensions;
+        setGlobalConflict({
+          itemName: 'Складський продукт',
+          attemptedQuantity: (ext?.currentQuantity as number) || 500,
+          currentServerQuantity: (ext?.currentQuantity as number) || 400,
+          unit: (ext?.unit as string) || 'g',
+          currentETag: ext?.currentETag as string,
+        });
         addToast({
           title: '409 Conflict Detected',
-          description: problem.detail || 'Дані змінено іншим учасником домогосподарства.',
+          description: problem.detail || 'Невідповідність ETag (PostgreSQL xmin).',
           variant: 'warning',
           traceId: problem.traceId,
         });
@@ -93,7 +129,7 @@ export function App() {
       ErrorListeners.onItemNotFound((problem) => {
         addToast({
           title: '404 Item Not Found',
-          description: problem.detail || 'Елемент уже був видалений іншим членом сімʼї.',
+          description: problem.detail || 'Обʼєкт було видалено іншим користувачем.',
           variant: 'warning',
           traceId: problem.traceId,
         });
@@ -102,7 +138,7 @@ export function App() {
       ErrorListeners.onInsufficientInventory((problem) => {
         addToast({
           title: '422 Insufficient Inventory',
-          description: problem.detail || 'Недостатня кількість продуктів для списання.',
+          description: problem.detail || 'Бракує інгредієнтів для списання.',
           variant: 'error',
           traceId: problem.traceId,
         });
@@ -111,7 +147,7 @@ export function App() {
       ErrorListeners.onServerError((problem) => {
         addToast({
           title: '500 Server Error',
-          description: problem.detail || 'Виникла помилка на сервері.',
+          description: problem.detail || 'Внутрішня помилка сервера.',
           variant: 'error',
           traceId: problem.traceId,
         });
@@ -123,79 +159,9 @@ export function App() {
     };
   }, []);
 
-  const handleSimulateValidationError = () => {
-    const qty = parseFloat(formQuantity);
-    if (isNaN(qty) || qty <= 0) {
-      setFormError('Кількість повинна бути більшою за 0 (VALIDATION_FAILED: quantity > 0)');
-      errorBus.emit<ProblemDetails>('validation-error', {
-        type: 'https://ediens.app/errors/validation-failed',
-        title: 'Validation Error',
-        status: 400,
-        errorCode: 'VALIDATION_FAILED',
-        detail: 'Поле quantity повинно містити невідʼємне значення.',
-      });
-    } else {
-      setFormError(null);
-      addToast({
-        title: 'Валідація пройдена',
-        description: `Вказано ${qty} г/мл.`,
-        variant: 'success',
-      });
-    }
-  };
-
-  const handleSimulateConflict = () => {
-    errorBus.emit('concurrent-modification', {
-      type: 'https://ediens.app/errors/concurrent-modification',
-      title: 'Conflict during state modification',
-      status: 409,
-      detail: 'Складський залишок змінено користувачем Anna.',
-      errorCode: 'CONCURRENT_MODIFICATION',
-      traceId: '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01',
-      extensions: {
-        currentETag: 'W/"10425"',
-        currentQuantity: 600,
-        unit: 'ml',
-      },
-    });
-  };
-
-  const handleSimulateRateLimit = () => {
-    errorBus.emit('rate-limit-exceeded', {
-      retryAfterSeconds: 20,
-      limit: 60,
-      windowSeconds: 60,
-    });
-  };
-
-  const handleSimulateItemNotFound = () => {
-    errorBus.emit('item-not-found', {
-      type: 'https://ediens.app/errors/item-not-found',
-      title: 'Resource Not Found',
-      status: 404,
-      detail: 'Партію молока ID #0192e2b3 було списано або видалено.',
-      errorCode: 'ITEM_NOT_FOUND',
-      traceId: '00-8899aabbccddeeff0011223344556677-1122334455667788-01',
-    });
-  };
-
-  const handleQuickAddMeal = () => {
-    setMacroData((prev) => ({
-      calories: { ...prev.calories, current: Math.min(prev.calories.target, prev.calories.current + 250) },
-      protein: { ...prev.protein, current: Math.min(prev.protein.target, prev.protein.current + 20) },
-      fat: { ...prev.fat, current: Math.min(prev.fat.target, prev.fat.current + 8) },
-      carbs: { ...prev.carbs, current: Math.min(prev.carbs.target, prev.carbs.current + 25) },
-    }));
-    addToast({
-      title: '1-Click Cook Залоговано',
-      description: '+250 ккал | +20г білка додано до щоденника (Idempotency-Key валідний).',
-      variant: 'success',
-    });
-  };
-
   return (
-    <div className="min-h-screen bg-background text-zinc-100 flex flex-col antialiased">
-      {/* Rate Limit Banner (RFC 9457 Reaction) */}
+    <div className="min-h-screen bg-background text-zinc-100 flex flex-col antialiased selection:bg-zinc-800 selection:text-white">
+      {/* 429 Rate Limit Alert Banner */}
       {rateLimitSeconds > 0 && (
         <RateLimitBanner
           retryAfterSeconds={rateLimitSeconds}
@@ -203,396 +169,271 @@ export function App() {
             setRateLimitSeconds(0);
             addToast({
               title: 'Кулдаун завершено',
-              description: 'Ліміти запитів відновлено. Кнопки розблоковано.',
+              description: 'Ліміти запитів відновлено.',
               variant: 'info',
             });
           }}
         />
       )}
 
-      {/* Main Header */}
-      <header className="border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      {/* Top Application Header */}
+      <header className="border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-md sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+          {/* Logo & Household Context */}
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-zinc-100 text-zinc-950 flex items-center justify-center font-bold font-mono text-base shadow-sm">
-              ē
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-base tracking-tight text-white">ēdiens</span>
-                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/60">
-                  UI Kit v1.0
-                </span>
+            <button
+              onClick={() => switchTab('inventory')}
+              className="flex items-center gap-2.5 focus:outline-none"
+            >
+              <div className="h-9 w-9 rounded-xl bg-zinc-100 text-zinc-950 flex items-center justify-center font-bold font-mono text-base shadow-sm">
+                ē
               </div>
-              <p className="text-[11px] text-zinc-400 leading-none">
-                Єдиний хаб запасів, макросів та рецептів
-              </p>
+              <div className="text-left hidden sm:block">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-base tracking-tight text-white">ēdiens</span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-zinc-800">
+                    TASK-07
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400 leading-none">
+                  Єдиний хаб запасів, макросів та рецептів
+                </p>
+              </div>
+            </button>
+
+            {/* Household Badge */}
+            <div className="hidden md:flex items-center gap-1.5 text-xs text-zinc-400 bg-zinc-900/80 border border-zinc-800 px-2.5 py-1 rounded-lg ml-2">
+              <Home className="h-3.5 w-3.5 text-sky-400" />
+              <span>Поділ, вул. Спаська</span>
+              <span className="text-[10px] text-zinc-500 font-mono">(Owner)</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Badge variant="outline" dot className="hidden sm:inline-flex text-[11px]">
-              PostgreSQL 17 xmin OCC
-            </Badge>
+          {/* Central Navigation Tabs */}
+          <nav className="flex items-center gap-1 overflow-x-auto py-1">
+            <button
+              onClick={() => switchTab('inventory')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'inventory'
+                  ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+              }`}
+            >
+              <Refrigerator className="h-3.5 w-3.5 text-sky-400" />
+              <span>Холодильник</span>
+            </button>
+
+            <button
+              onClick={() => switchTab('macros')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'macros'
+                  ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+              }`}
+            >
+              <Activity className="h-3.5 w-3.5 text-amber-400" />
+              <span>Макроси</span>
+            </button>
+
+            <button
+              onClick={() => switchTab('recipes')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'recipes'
+                  ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Рецепти</span>
+            </button>
+
+            <button
+              onClick={() => switchTab('shopping')}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'shopping'
+                  ? 'bg-zinc-800 text-white border border-zinc-700 shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+              }`}
+            >
+              <ShoppingCart className="h-3.5 w-3.5 text-indigo-400" />
+              <span>Покупки</span>
+            </button>
+          </nav>
+
+          {/* Right Header Badges & Actions */}
+          <div className="flex items-center gap-2.5">
+            {/* Online / Offline status */}
+            <div
+              className={`hidden lg:flex items-center gap-1.5 text-xs font-mono px-2.5 py-1 rounded-lg border ${
+                isOffline
+                  ? 'bg-amber-950/40 border-amber-800 text-amber-300'
+                  : 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
+              }`}
+            >
+              {isOffline ? (
+                <>
+                  <WifiOff className="h-3 w-3 text-amber-400" />
+                  <span>OFFLINE {offlineChanges > 0 ? `(${offlineChanges})` : ''}</span>
+                </>
+              ) : (
+                <>
+                  <Wifi className="h-3 w-3 text-emerald-400" />
+                  <span>ONLINE</span>
+                </>
+              )}
+            </div>
+
             <Button
               variant="outline"
               size="sm"
-              icon={<Sparkles className="h-3.5 w-3.5 text-amber-400" />}
-              onClick={() => setIsDemoModalOpen(true)}
+              icon={<ShieldAlert className="h-3.5 w-3.5 text-sky-400" />}
+              onClick={() => setIsSpecModalOpen(true)}
+              className="text-xs"
             >
-              Специфікація UI Kit
+              Архітектура
             </Button>
           </div>
         </div>
       </header>
 
-      {/* Body Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
-        {/* Intro Hero Card */}
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Card className="lg:col-span-2 relative overflow-hidden border-zinc-800/80">
-            <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
-              <UtensilsCrossed className="w-64 h-64 text-white" />
-            </div>
-            <CardHeader>
-              <div className="flex items-center gap-2 text-xs font-mono text-zinc-400 mb-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                <span>TASK-05 FOUNDATION ACTIVE</span>
-              </div>
-              <CardTitle className="text-2xl font-bold tracking-tight text-white">
-                ElevenLabs Monochrome UI Kit & RFC 9457 Client
-              </CardTitle>
-              <CardDescription className="text-zinc-400 text-sm max-w-xl">
-                Модульна дизайн-система для управління складськими партіями за FEFO, оптимістичного блокування
-                конфліктів через <code className="font-mono text-zinc-300">If-Match (ETag)</code> та реакції на помилки RFC 9457.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2">
-                <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80">
-                  <div className="text-[11px] text-zinc-500 uppercase tracking-wider font-semibold">Фреймворк</div>
-                  <div className="text-sm font-semibold text-zinc-200 mt-0.5">React 19 + Vite</div>
-                </div>
-                <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80">
-                  <div className="text-[11px] text-zinc-500 uppercase tracking-wider font-semibold">Стилі</div>
-                  <div className="text-sm font-semibold text-zinc-200 mt-0.5">Tailwind ElevenLabs</div>
-                </div>
-                <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80">
-                  <div className="text-[11px] text-zinc-500 uppercase tracking-wider font-semibold">HTTP Клієнт</div>
-                  <div className="text-sm font-semibold text-zinc-200 mt-0.5">Axios + TraceContext</div>
-                </div>
-                <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800/80">
-                  <div className="text-[11px] text-zinc-500 uppercase tracking-wider font-semibold">Помилки</div>
-                  <div className="text-sm font-semibold text-zinc-200 mt-0.5">RFC 9457 Interceptor</div>
-                </div>
-              </div>
-            </CardContent>
-            <CardFooter className="flex flex-wrap gap-2.5">
-              <Button
-                variant="default"
-                size="sm"
-                icon={<Flame className="h-4 w-4 text-amber-500" />}
-                onClick={handleQuickAddMeal}
-              >
-                1-Click Cook (+250 ккал)
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                icon={<RefreshCw className="h-3.5 w-3.5" />}
-                onClick={() =>
-                  setMacroData({
-                    calories: { current: 1680, target: 2200 },
-                    protein: { current: 135, target: 160 },
-                    fat: { current: 52, target: 70 },
-                    carbs: { current: 165, target: 230 },
-                  })
-                }
-              >
-                Скинути макроси
-              </Button>
-            </CardFooter>
-          </Card>
+      {/* Main Feature View Container */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
+        {activeTab === 'inventory' && (
+          <InventoryPage
+            onShowToast={(title, description, variant) =>
+              addToast({ title, description, variant })
+            }
+          />
+        )}
 
-          {/* Macro Progress Ring Card */}
-          <Card className="flex flex-col items-center justify-center p-6 border-zinc-800/80">
-            <CardHeader className="text-center p-0 pb-3 w-full">
-              <CardTitle className="text-base font-semibold">Залишок макро-бюджету</CardTitle>
-              <CardDescription>Динамічний перерахунок КБЖВ на день</CardDescription>
-            </CardHeader>
-            <CardContent className="p-0 flex flex-col items-center">
-              <MacroRing
-                calories={macroData.calories}
-                protein={macroData.protein}
-                fat={macroData.fat}
-                carbs={macroData.carbs}
-                size={170}
-                strokeWidth={9}
-              />
-            </CardContent>
-          </Card>
-        </section>
+        {activeTab === 'macros' && (
+          <MacroTrackerPage
+            onShowToast={(title, description, variant) =>
+              addToast({ title, description, variant })
+            }
+          />
+        )}
 
-        {/* RFC 9457 Reaction Matrix Testbench */}
-        <section className="space-y-4">
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-amber-400" />
-            <h2 className="text-lg font-semibold tracking-tight text-white">
-              RFC 9457 Problem Details Client Reaction Matrix
-            </h2>
-          </div>
+        {activeTab === 'recipes' && (
+          <RecipesPage
+            onShowToast={(title, description, variant) =>
+              addToast({ title, description, variant })
+            }
+            onNavigateToShoppingList={() => switchTab('shopping')}
+          />
+        )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* 400 Validation Card */}
-            <Card className="flex flex-col justify-between">
-              <CardHeader>
-                <Badge variant="outline" className="w-fit text-[10px] font-mono mb-1">
-                  HTTP 400
-                </Badge>
-                <CardTitle className="text-sm">400 VALIDATION_FAILED</CardTitle>
-                <CardDescription>
-                  Підсвітка помилок форми біля полів вводу за схемою RFC 9457.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <FormField>
-                  <FormLabel htmlFor="qty-input">Вага продукту (г):</FormLabel>
-                  <Input
-                    id="qty-input"
-                    value={formQuantity}
-                    onChange={(e) => {
-                      setFormQuantity(e.target.value);
-                      if (formError) setFormError(null);
-                    }}
-                    error={Boolean(formError)}
-                    suffix="г"
-                  />
-                  <FormError message={formError} />
-                </FormField>
-              </CardContent>
-              <CardFooter>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-xs"
-                  onClick={handleSimulateValidationError}
-                >
-                  Перевірити (спробуйте 0 або -10)
-                </Button>
-              </CardFooter>
-            </Card>
-
-            {/* 409 Conflict Card */}
-            <Card className="flex flex-col justify-between">
-              <CardHeader>
-                <Badge variant="outline" className="w-fit text-[10px] font-mono mb-1">
-                  HTTP 409
-                </Badge>
-                <CardTitle className="text-sm">409 CONCURRENT_MODIFICATION</CardTitle>
-                <CardDescription>
-                  Невідповідність ETag (PostgreSQL xmin) при одночасному списанні партій.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-zinc-400 leading-relaxed">
-                  Відкриває <code className="font-mono text-zinc-300">&lt;ConflictResolutionModal&gt;</code> з порівнянням
-                  серверного залишку та пропозицією вибору з 3 варіантів дій.
-                </p>
-              </CardContent>
-              <CardFooter>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="w-full text-xs"
-                  onClick={handleSimulateConflict}
-                >
-                  Змоделювати конфлікт ETag
-                </Button>
-              </CardFooter>
-            </Card>
-
-            {/* 429 Rate Limit Card */}
-            <Card className="flex flex-col justify-between">
-              <CardHeader>
-                <Badge variant="outline" className="w-fit text-[10px] font-mono mb-1">
-                  HTTP 429
-                </Badge>
-                <CardTitle className="text-sm">429 RATE_LIMIT_EXCEEDED</CardTitle>
-                <CardDescription>
-                  Перевищення ліміту сканування штрих-кодів або AI-рекомендацій.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-zinc-400 leading-relaxed">
-                  Відображає <code className="font-mono text-zinc-300">&lt;RateLimitBanner&gt;</code> із живим зворотним
-                  відліком секунд з заголовка <code className="font-mono text-zinc-300">Retry-After</code>.
-                </p>
-              </CardContent>
-              <CardFooter>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-xs"
-                  disabled={rateLimitSeconds > 0}
-                  onClick={handleSimulateRateLimit}
-                >
-                  {rateLimitSeconds > 0 ? `Кулдаун (${rateLimitSeconds}с)` : 'Змоделювати Rate Limit (20с)'}
-                </Button>
-              </CardFooter>
-            </Card>
-
-            {/* 404 / 422 Events Card */}
-            <Card className="flex flex-col justify-between">
-              <CardHeader>
-                <Badge variant="outline" className="w-fit text-[10px] font-mono mb-1">
-                  HTTP 404 / 422
-                </Badge>
-                <CardTitle className="text-sm">404 & 422 Доменні реакції</CardTitle>
-                <CardDescription>
-                  Видалені товари та недостатня кількість інгредієнтів.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start text-xs border border-zinc-800"
-                  onClick={handleSimulateItemNotFound}
-                >
-                  <AlertCircle className="h-3.5 w-3.5 text-amber-400 mr-2" />
-                  404 ITEM_NOT_FOUND Toast
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start text-xs border border-zinc-800"
-                  onClick={() =>
-                    errorBus.emit('insufficient-inventory', {
-                      status: 422,
-                      errorCode: 'INSUFFICIENT_INVENTORY',
-                      detail: 'Не вистачає 150г курячого філе для приготування.',
-                    })
-                  }
-                >
-                  <Package className="h-3.5 w-3.5 text-rose-400 mr-2" />
-                  422 INSUFFICIENT_INVENTORY
-                </Button>
-              </CardContent>
-              <CardFooter>
-                <div className="text-[11px] text-zinc-500 font-mono w-full text-center">
-                  Автоматичне керування чергою
-                </div>
-              </CardFooter>
-            </Card>
-          </div>
-        </section>
-
-        {/* FEFO Badges & UI Elements Showcase */}
-        <section className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Layers className="h-5 w-5 text-sky-400" />
-            <h2 className="text-lg font-semibold tracking-tight text-white">
-              FEFO Badges & Design System Elements
-            </h2>
-          </div>
-
-          <Card>
-            <CardContent className="p-6 space-y-6">
-              {/* FEFO Statuses */}
-              <div>
-                <div className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-3">
-                  Динамічні FEFO-індикатори придатності:
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <FreshnessBadge status="FRESH" days={8} />
-                  <FreshnessBadge status="EXPIRING_SOON" days={2} />
-                  <FreshnessBadge status="CRITICAL" days={0} />
-                  <FreshnessBadge status="EXPIRED" />
-                  <Badge variant="offline" dot>
-                    OFFLINE_MODE
-                  </Badge>
-                </div>
-              </div>
-
-              {/* Button Variants */}
-              <div>
-                <div className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-3">
-                  Кнопки (ElevenLabs Button Suite):
-                </div>
-                <div className="flex flex-wrap gap-2.5">
-                  <Button variant="default">Primary Button</Button>
-                  <Button variant="secondary">Secondary Button</Button>
-                  <Button variant="outline">Outline Button</Button>
-                  <Button variant="ghost">Ghost Button</Button>
-                  <Button variant="danger">Danger Action</Button>
-                  <Button variant="default" loading>
-                    Saving
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
+        {activeTab === 'shopping' && (
+          <ShoppingListPage
+            onShowToast={(title, description, variant) =>
+              addToast({ title, description, variant })
+            }
+          />
+        )}
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-zinc-900 bg-zinc-950 py-6 text-center text-xs text-zinc-500">
-        <p>ēdiens Frontend Foundation • React 19 • Vite • Tailwind CSS • RFC 9457 Compliant</p>
+      <footer className="border-t border-zinc-900 bg-zinc-950/80 py-5 text-center text-xs text-zinc-500">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <p>ēdiens • React 19 • Vite • FEFO Inventory • RFC 9457 OCC • Offline-First</p>
+          <div className="flex items-center gap-3 text-[11px] font-mono text-zinc-400">
+            <span>PostgreSQL xmin: OK</span>
+            <span>•</span>
+            <span>HybridCache: Ready</span>
+          </div>
+        </div>
       </footer>
 
       {/* 409 Conflict Resolution Modal */}
-      <ConflictResolutionModal
-        isOpen={isConflictOpen}
-        onClose={() => setIsConflictOpen(false)}
-        itemName="Молоко 'Селянське' 2.5%"
-        attemptedQuantity={400}
-        currentServerQuantity={600}
-        unit="ml"
-        currentETag='W/"10425"'
-        modifiedBy="користувачем Anna"
-        onAcceptServer={() => {
-          addToast({
-            title: 'Конфлікт вирішено',
-            description: 'Прийнято актуальний залишок сервера (600 ml).',
-            variant: 'success',
-          });
-        }}
-        onReapplyWithServerQuantity={(newQty, etag) => {
-          addToast({
-            title: 'Списання скориговано',
-            description: `Запит відправлено з новим If-Match: ${etag || 'W/"10425"'} (новий залишок: ${newQty} ml).`,
-            variant: 'success',
-          });
-        }}
-      />
+      {globalConflict && (
+        <ConflictResolutionModal
+          isOpen={Boolean(globalConflict)}
+          onClose={() => setGlobalConflict(null)}
+          itemName={globalConflict.itemName}
+          attemptedQuantity={globalConflict.attemptedQuantity}
+          currentServerQuantity={globalConflict.currentServerQuantity}
+          unit={globalConflict.unit}
+          currentETag={globalConflict.currentETag}
+          onAcceptServer={() => {
+            addToast({
+              title: 'Конфлікт вирішено',
+              description: 'Прийнято поточний стан сервера.',
+              variant: 'success',
+            });
+            setGlobalConflict(null);
+          }}
+          onReapplyWithServerQuantity={(newQty, etag) => {
+            addToast({
+              title: 'Списання оновлено',
+              description: `Запит повторено з If-Match: ${etag || 'W/"..."'} (кількість: ${newQty}).`,
+              variant: 'success',
+            });
+            setGlobalConflict(null);
+          }}
+        />
+      )}
 
-      {/* Demo Modal */}
+      {/* Architecture Spec Modal */}
       <Modal
-        isOpen={isDemoModalOpen}
-        onClose={() => setIsDemoModalOpen(false)}
-        title="Специфікація ElevenLabs UI Kit"
-        description="Архітектурні особливості компонентальної бібліотеки ēdiens."
+        isOpen={isSpecModalOpen}
+        onClose={() => setIsSpecModalOpen(false)}
+        maxWidth="lg"
+        title="Специфікація TASK-07: React Interactive Feature Views"
+        description="Повний перелік реалізованих інтерактивних підсистем згідно з AGENTS.md та KNOWLEDGE.md"
         footer={
-          <Button variant="default" size="sm" onClick={() => setIsDemoModalOpen(false)}>
-            Зрозуміло
+          <Button variant="default" size="sm" onClick={() => setIsSpecModalOpen(false)}>
+            Закрити
           </Button>
         }
       >
         <div className="space-y-3 text-xs text-zinc-300 leading-relaxed">
-          <p>
-            Компонентна база реалізована з урахуванням високої контрастності, мінімалістичних монохромних рамок
-            <code className="text-zinc-200 font-mono"> border-zinc-800</code>, темного фону
-            <code className="text-zinc-200 font-mono"> bg-zinc-950</code> та мікро-анімацій натискання.
-          </p>
-          <p>
-            Усі помилки мережі обробляються централізовано через
-            <code className="text-zinc-200 font-mono"> errorHandler.ts</code>, що гарантує 100% відповідність
-            стандарту RFC 9457 та специфікації OpenAPI.
-          </p>
+          <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 space-y-1">
+            <div className="font-semibold text-white flex items-center gap-1.5">
+              <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
+              <span>1. Холодильник та FEFO Інвентар</span>
+            </div>
+            <p className="text-zinc-400 text-[11px]">
+              Сортування за принципом First Expired, First Out; бейджі свіжості (Green / Amber / Red / Expired);
+              атомарне списання кількості з перевіркою версії ETag (xmin) та викликом ConflictResolutionModal при 409.
+            </p>
+          </div>
+
+          <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 space-y-1">
+            <div className="font-semibold text-white flex items-center gap-1.5">
+              <CheckCircle className="h-3.5 w-3.5 text-amber-400" />
+              <span>2. Трекер макронутрієнтів (КБЖВ)</span>
+            </div>
+            <p className="text-zinc-400 text-[11px]">
+              Концентричне макро-кільце MacroProgressRing, перерахунок залишку денного бюджету калорій,
+              налаштування цілей КБЖВ, форма логування прийомів їжі із захистом Idempotency-Key.
+            </p>
+          </div>
+
+          <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 space-y-1">
+            <div className="font-semibold text-white flex items-center gap-1.5">
+              <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
+              <span>3. Розумні рецепти & 1-Click Cook</span>
+            </div>
+            <p className="text-zinc-400 text-[11px]">
+              Скоринг рецептів на основі продуктів, що спливають; транзакційне списання інгредієнтів за FEFO
+              з одночасним логуванням макросів; реакція 422 з модальним вікном додавання відсутніх товарів до списку.
+            </p>
+          </div>
+
+          <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 space-y-1">
+            <div className="font-semibold text-white flex items-center gap-1.5">
+              <CheckCircle className="h-3.5 w-3.5 text-sky-400" />
+              <span>4. Спільний список покупок (Offline-First)</span>
+            </div>
+            <p className="text-zinc-400 text-[11px]">
+              Повна підтримка офлайн-роботи в супермаркеті через LocalStorage; перемикання мережевого режиму;
+              синхронізація локальних змін злиттям через POST /shopping-list/sync.
+            </p>
+          </div>
         </div>
       </Modal>
 
-      {/* Global Toast Container */}
+      {/* Global Toast Notifications */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
