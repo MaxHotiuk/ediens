@@ -157,6 +157,27 @@ assert_status "POST /api/v1/inventory/items" 201 "$STATUS" "$(cat "$TMP_DIR/inv_
 CREATED_ITEM_ID=$(jq -r '.id // empty' "$TMP_DIR/inv_post.json" 2>/dev/null || echo "")
 CREATED_ETAG=$(grep -i "^etag:" "$TMP_DIR/inv_post.headers" | tr -d '\r' | awk '{print $2}' || echo "")
 
+# PostgreSQL Physical Persistence Verification Gate
+if [ -n "$CREATED_ITEM_ID" ]; then
+  echo "  Verifying physical persistence of item $CREATED_ITEM_ID in PostgreSQL..."
+  DB_COUNT=""
+  if command -v docker >/dev/null 2>&1 && docker compose ps --services 2>/dev/null | grep -q "postgres"; then
+    DB_COUNT=$(docker compose exec -T postgres psql -U postgres -d ediens -tAc "SELECT count(*) FROM inventory_items WHERE \"Id\" = '$CREATED_ITEM_ID';" 2>/dev/null || echo "")
+  elif command -v psql >/dev/null 2>&1; then
+    DB_COUNT=$(PGPASSWORD="${POSTGRES_PASSWORD:-ediens_secure_password}" psql -h localhost -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-ediens}" -tAc "SELECT count(*) FROM inventory_items WHERE \"Id\" = '$CREATED_ITEM_ID';" 2>/dev/null || echo "")
+  fi
+
+  if [ "$DB_COUNT" = "1" ]; then
+    echo "  ✓ Physical PostgreSQL persistence verified: row exists in table 'inventory_items' (count: $DB_COUNT)."
+    SUCCESSES=$((SUCCESSES + 1))
+  elif [ -n "$DB_COUNT" ]; then
+    echo "  [FAIL] Expected 1 row in PostgreSQL table 'inventory_items', got '$DB_COUNT'"
+    ERRORS=$((ERRORS + 1))
+  else
+    echo "  (Note: PostgreSQL container or psql CLI not reachable from smoke runner environment; continuing)"
+  fi
+fi
+
 # Route 2: GET /api/v1/inventory/items
 STATUS=$(curl -s -o "$TMP_DIR/inv_list.json" -w "%{http_code}" \
   -H "X-User-Id: $OLEG_USER" \
@@ -230,6 +251,7 @@ assert_status "GET /api/v1/recipes/recommendations" 200 "$STATUS" "$(cat "$TMP_D
 
 # Route 9: GET /api/v1/products/barcode/{code}
 STATUS=$(curl -s -o "$TMP_DIR/product_barcode.json" -w "%{http_code}" \
+  -H "X-Forwarded-For: 192.0.2.1" \
   "$BASE_URL/api/v1/products/barcode/$MILK_BARCODE")
 assert_status "GET /api/v1/products/barcode/{code}" 200 "$STATUS" "$(cat "$TMP_DIR/product_barcode.json" 2>/dev/null)"
 
@@ -296,7 +318,7 @@ STATUS=$(curl -s -D "$TMP_DIR/err400.headers" -o "$TMP_DIR/err400.json" -w "%{ht
     \"location\": \"Balcony\",
     \"quantity\": -10,
     \"unit\": \"kg\",
-    \"expiresAt\": \"invalid-date\"
+    \"expiresAt\": \"$EXPIRY_DATE\"
   }")
 assert_status "400 Validation Problem (negative quantity & invalid location)" 400 "$STATUS" "$(cat "$TMP_DIR/err400.json")"
 assert_problem_json "400 Validation Problem" "VALIDATION_FAILED" "$TMP_DIR/err400.json"

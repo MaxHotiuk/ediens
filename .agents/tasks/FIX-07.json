@@ -1,0 +1,35 @@
+{
+  "id": "FIX-07",
+  "title": "Eliminate Browser Storage Mocks & Enforce Real PostgreSQL EF Core Persistence",
+  "status": "DONE",
+  "assigned_to": "Maxs-MacBook-Air",
+  "updated_at": "2026-10-31T17:36:01Z",
+  "branch": "fix/FIX-07-real-postgres-persistence",
+  "dependencies": [
+    "FIX-06"
+  ],
+  "allowed_paths": [
+    "compose.yaml",
+    "scripts/**",
+    "src/Ediens.Api/**",
+    "src/Ediens.Tests/**",
+    "src/ediens-web/**",
+    "docs/VERIFICATION.md"
+  ],
+  "deliverables": [
+    "src/Ediens.Api/Program.cs",
+    "src/Ediens.Api/Data/EdiensDbContext.cs",
+    "src/Ediens.Api/Data/DbInitializer.cs",
+    "src/ediens-web/src/api/client.ts",
+    "scripts/verify.sh",
+    "scripts/smoke-test.sh",
+    "docs/VERIFICATION.md"
+  ],
+  "acceptance_criteria": [
+    "Completely remove all localStorage, sessionStorage, IndexedDB, and in-memory Zustand/context mock persistence for domain entities (inventory, meals, macros, recipes, households, shopping list) from src/ediens-web.",
+    "Ensure src/Ediens.Api uses Npgsql.EntityFrameworkCore.PostgreSQL connected to the real PostgreSQL database without any InMemory or static List<T> repositories.",
+    "Automatically apply EF Core schema migrations/creation and run DbInitializer seeding on backend startup so initial data resides physically in PostgreSQL.",
+    "Enforce a static grep check in ./scripts/verify.sh that fails with exit code 1 if localStorage/sessionStorage is used in src/ediens-web/src/features, pages, store, or api.",
+    "Verify via ./scripts/smoke-test.sh and direct psql queries against the postgres container that POST/PATCH/DELETE API calls mutate real rows in PostgreSQL and survive browser incognito/storage clears."
+  ]
+}

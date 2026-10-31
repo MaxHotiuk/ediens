@@ -97,13 +97,39 @@ app.UseMiddleware<IdempotencyMiddleware>();
 app.MapGet("/", () => Results.Redirect("/swagger"))
    .ExcludeFromDescription();
 
-app.MapGet("/health", () => Results.Ok(new
+app.MapGet("/health", async (EdiensDbContext db) =>
 {
-    status = "Healthy",
-    timestamp = DateTime.UtcNow,
-    service = "Ediens.Api",
-    version = "1.0.0"
-}))
+    bool dbConnected = false;
+    try
+    {
+        dbConnected = await db.Database.CanConnectAsync();
+    }
+    catch
+    {
+        dbConnected = false;
+    }
+
+    if (!dbConnected)
+    {
+        return Results.Json(new
+        {
+            status = "Unhealthy",
+            database = "Disconnected",
+            timestamp = DateTime.UtcNow,
+            service = "Ediens.Api",
+            version = "1.0.0"
+        }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+
+    return Results.Ok(new
+    {
+        status = "Healthy",
+        database = "Connected",
+        timestamp = DateTime.UtcNow,
+        service = "Ediens.Api",
+        version = "1.0.0"
+    });
+})
 .WithName("HealthCheck")
 .WithTags("System")
 .WithOpenApi();
@@ -192,7 +218,7 @@ try
                     await db.Database.EnsureCreatedAsync();
                 }
 
-                await Ediens.Api.Features.Common.DatabaseSeeder.SeedAsync(db);
+                await DbInitializer.SeedAsync(db);
                 logger.LogInformation("База даних PostgreSQL успішно ініціалізована та заповнена базовими даними.");
             }
             catch (Exception ex)
@@ -213,7 +239,7 @@ try
     else
     {
         await db.Database.EnsureCreatedAsync();
-        await Ediens.Api.Features.Common.DatabaseSeeder.SeedAsync(db);
+        await DbInitializer.SeedAsync(db);
     }
 }
 catch (Exception ex)

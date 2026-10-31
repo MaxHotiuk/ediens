@@ -9,49 +9,18 @@ import { Badge } from '../../components/ui/Badge';
 import {
   ShoppingCart,
   Plus,
-  Wifi,
-  WifiOff,
   RefreshCw,
   Trash2,
   CheckCheck,
+  Database,
 } from 'lucide-react';
 
 export interface ShoppingListViewProps {
   onShowToast: (title: string, desc: string, variant?: 'info' | 'success' | 'warning' | 'error') => void;
 }
 
-interface OfflineChange {
-  id: string;
-  productName: string;
-  quantity: number;
-  unit: MeasurementUnit;
-  isPurchased: boolean;
-  clientUpdatedAt: string;
-}
-
 export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
-  const [items, setItems] = useState<ShoppingListItem[]>(() => {
-    try {
-      const cached = localStorage.getItem('ediens_shopping_items_cache');
-      return cached ? JSON.parse(cached) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [isOffline, setIsOffline] = useState<boolean>(() => {
-    return localStorage.getItem('ediens_offline_sim') === 'true';
-  });
-
-  const [pendingChanges, setPendingChanges] = useState<OfflineChange[]>(() => {
-    try {
-      const queue = localStorage.getItem('ediens_shopping_offline_queue');
-      return queue ? JSON.parse(queue) : [];
-    } catch {
-      return [];
-    }
-  });
-
+  const [items, setItems] = useState<ShoppingListItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -60,21 +29,11 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
   const [newUnit, setNewUnit] = useState<MeasurementUnit>('pcs');
   const [filterMode, setFilterMode] = useState<'all' | 'pending' | 'purchased'>('all');
 
-  const saveOfflineQueue = (queue: OfflineChange[]) => {
-    setPendingChanges(queue);
-    localStorage.setItem('ediens_shopping_offline_queue', JSON.stringify(queue));
-  };
-
   const loadItems = useCallback(async () => {
-    if (localStorage.getItem('ediens_offline_sim') === 'true') {
-      return;
-    }
-
     setIsLoading(true);
     try {
       const serverItems = await ediensApi.shoppingList.getItems(DEFAULT_HOUSEHOLD_ID);
       setItems(serverItems);
-      localStorage.setItem('ediens_shopping_items_cache', JSON.stringify(serverItems));
     } catch (err: unknown) {
       const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Не вдалося завантажити список покупок із сервера';
       onShowToast('Помилка завантаження', msg, 'error');
@@ -87,57 +46,13 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
     loadItems();
   }, [loadItems]);
 
-  const handleSync = async () => {
-    if (pendingChanges.length === 0) {
-      await loadItems();
-      onShowToast('Синхронізовано', 'Список покупок актуальний із сервером.', 'info');
-      return;
-    }
-
+  const handleRefresh = async () => {
     setIsSyncing(true);
     try {
-      const res = await ediensApi.shoppingList.sync(DEFAULT_HOUSEHOLD_ID, {
-        clientChanges: pendingChanges,
-      });
-      setItems(res);
-      localStorage.setItem('ediens_shopping_items_cache', JSON.stringify(res));
-      const count = pendingChanges.length;
-      saveOfflineQueue([]);
-      onShowToast(
-        'Синхронізацію завершено',
-        `Спільний список домогосподарства успішно оновлено (${count} змін злито через POST /shopping-list/sync).`,
-        'success'
-      );
-    } catch (err: unknown) {
-      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка синхронізації списку покупок';
-      onShowToast('Помилка синхронізації', msg, 'error');
+      await loadItems();
+      onShowToast('Синхронізовано', 'Список покупок актуальний із базою даних PostgreSQL.', 'info');
     } finally {
       setIsSyncing(false);
-    }
-  };
-
-  const handleToggleOffline = async () => {
-    const next = !isOffline;
-    setIsOffline(next);
-    localStorage.setItem('ediens_offline_sim', String(next));
-
-    if (next) {
-      onShowToast(
-        'Офлайн-режим увімкнено',
-        'Усі відмітки та зміни зберігаються локально в LocalStorage.',
-        'warning'
-      );
-    } else {
-      onShowToast(
-        'Підключення до мережі відновлено',
-        'Синхронізуємо локальні зміни із сервером...',
-        'info'
-      );
-      if (pendingChanges.length > 0) {
-        await handleSync();
-      } else {
-        await loadItems();
-      }
     }
   };
 
@@ -147,21 +62,13 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
 
     const qty = parseFloat(newQuantity) || 1;
     const nowIso = new Date().toISOString();
-    const newItem: ShoppingListItem = {
-      id: generateUuid(),
-      householdId: DEFAULT_HOUSEHOLD_ID,
+    const newItemId = generateUuid();
+
+    const change = {
+      id: newItemId,
       productName: newName.trim(),
       quantity: qty,
       unit: newUnit,
-      isPurchased: false,
-      updatedAt: nowIso,
-    };
-
-    const change: OfflineChange = {
-      id: newItem.id,
-      productName: newItem.productName,
-      quantity: newItem.quantity,
-      unit: newItem.unit,
       isPurchased: false,
       clientUpdatedAt: nowIso,
     };
@@ -169,34 +76,20 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
     setNewName('');
     setNewQuantity('1');
 
-    if (isOffline) {
-      const updatedList = [newItem, ...items];
-      setItems(updatedList);
-      localStorage.setItem('ediens_shopping_items_cache', JSON.stringify(updatedList));
-      saveOfflineQueue([...pendingChanges, change]);
+    try {
+      const res = await ediensApi.shoppingList.sync(DEFAULT_HOUSEHOLD_ID, {
+        clientChanges: [change],
+      });
+      setItems(res);
       onShowToast(
-        'Товар додано [офлайн]',
-        `«${newItem.productName}» (${qty} ${newUnit}) додано до локального списку.`,
-        'info'
+        'Товар додано',
+        `«${change.productName}» (${qty} ${newUnit}) збережено у базі даних PostgreSQL.`,
+        'success'
       );
-    } else {
-      setItems((prev) => [newItem, ...prev]);
-      try {
-        const res = await ediensApi.shoppingList.sync(DEFAULT_HOUSEHOLD_ID, {
-          clientChanges: [change],
-        });
-        setItems(res);
-        localStorage.setItem('ediens_shopping_items_cache', JSON.stringify(res));
-        onShowToast(
-          'Товар додано',
-          `«${newItem.productName}» (${qty} ${newUnit}) синхронізовано з базою даних.`,
-          'success'
-        );
-      } catch (err: unknown) {
-        saveOfflineQueue([...pendingChanges, change]);
-        const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Збережено в офлайн-чергу';
-        onShowToast('Збережено локально', msg, 'warning');
-      }
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка збереження товару';
+      onShowToast('Помилка додавання', msg, 'error');
+      await loadItems();
     }
   };
 
@@ -206,73 +99,49 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
 
     const nowIso = new Date().toISOString();
     const updatedStatus = !target.isPurchased;
-    const updatedList = items.map((i) =>
-      i.id === id ? { ...i, isPurchased: updatedStatus, updatedAt: nowIso } : i
-    );
-    setItems(updatedList);
-    localStorage.setItem('ediens_shopping_items_cache', JSON.stringify(updatedList));
 
-    const change: OfflineChange = {
-      id: target.id,
-      productName: target.productName,
-      quantity: target.quantity,
-      unit: target.unit,
-      isPurchased: updatedStatus,
-      clientUpdatedAt: nowIso,
-    };
-
-    if (isOffline) {
-      const filteredQueue = pendingChanges.filter((c) => c.id !== id);
-      saveOfflineQueue([...filteredQueue, change]);
-      onShowToast(
-        'Збережено офлайн',
-        'Статус оновлено локально. Буде синхронізовано після повернення в мережу.',
-        'info'
-      );
-    } else {
-      try {
-        const res = await ediensApi.shoppingList.sync(DEFAULT_HOUSEHOLD_ID, {
-          clientChanges: [change],
-        });
-        setItems(res);
-        localStorage.setItem('ediens_shopping_items_cache', JSON.stringify(res));
-      } catch {
-        const filteredQueue = pendingChanges.filter((c) => c.id !== id);
-        saveOfflineQueue([...filteredQueue, change]);
-      }
+    try {
+      const res = await ediensApi.shoppingList.sync(DEFAULT_HOUSEHOLD_ID, {
+        clientChanges: [
+          {
+            id: target.id,
+            productName: target.productName,
+            quantity: target.quantity,
+            unit: target.unit,
+            isPurchased: updatedStatus,
+            clientUpdatedAt: nowIso,
+          },
+        ],
+      });
+      setItems(res);
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка оновлення статусу товару';
+      onShowToast('Помилка', msg, 'error');
+      await loadItems();
     }
   };
 
   const handleDelete = async (id: string) => {
-    setItems((prev) => prev.filter((i) => i.id !== id));
-    saveOfflineQueue(pendingChanges.filter((c) => c.id !== id));
-
-    if (!isOffline) {
-      try {
-        await fetch(`/api/v1/households/${DEFAULT_HOUSEHOLD_ID}/shopping-list/items/${id}`, {
-          method: 'DELETE',
-        });
-      } catch {
-        // Ignored in UI
-      }
+    try {
+      await ediensApi.shoppingList.deleteItem(DEFAULT_HOUSEHOLD_ID, id);
+      setItems((prev) => prev.filter((i) => i.id !== id));
+      onShowToast('Товар видалено', 'Позицію видалено з бази даних PostgreSQL.', 'info');
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка видалення';
+      onShowToast('Помилка', msg, 'error');
+      await loadItems();
     }
   };
 
   const handleClearPurchased = async () => {
-    setItems((prev) => prev.filter((i) => !i.isPurchased));
-    saveOfflineQueue(pendingChanges.filter((c) => !items.find((i) => i.id === c.id && i.isPurchased)));
-
-    if (!isOffline) {
-      try {
-        await fetch(`/api/v1/households/${DEFAULT_HOUSEHOLD_ID}/shopping-list/purchased`, {
-          method: 'DELETE',
-        });
-        onShowToast('Очищено', 'Всі придбані товари видалено зі списку.', 'info');
-      } catch {
-        // Local state already updated
-      }
-    } else {
-      onShowToast('Очищено [офлайн]', 'Придбані товари видалено локально.', 'info');
+    try {
+      await ediensApi.shoppingList.clearPurchased(DEFAULT_HOUSEHOLD_ID);
+      setItems((prev) => prev.filter((i) => !i.isPurchased));
+      onShowToast('Очищено', 'Всі придбані товари видалено з бази даних PostgreSQL.', 'info');
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка очищення';
+      onShowToast('Помилка', msg, 'error');
+      await loadItems();
     }
   };
 
@@ -284,7 +153,6 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
 
   const pendingCount = items.filter((i) => !i.isPurchased).length;
   const purchasedCount = items.filter((i) => i.isPurchased).length;
-  const offlineChanges = pendingChanges.length;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -296,66 +164,30 @@ export function ShoppingListView({ onShowToast }: ShoppingListViewProps) {
             <span>Спільний список покупок</span>
           </h1>
           <p className="text-xs text-zinc-400 mt-1">
-            Офлайн-орієнтований спільний список для сім&apos;ї з локальним кешуванням та синхронізацією змін.
+            Спільний список для сім&apos;ї з надійним збереженням у PostgreSQL та синхронізацією змін.
           </p>
         </div>
 
-        {/* Network & Sync Status Controls */}
+        {/* Database & Sync Controls */}
         <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={handleToggleOffline}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono transition-all ${
-              isOffline
-                ? 'bg-amber-950/40 border-amber-700 text-amber-300'
-                : 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
-            }`}
-            title="Перемкнути симуляцію офлайн-режиму"
-          >
-            {isOffline ? (
-              <>
-                <WifiOff className="h-3.5 w-3.5 text-amber-400" />
-                <span>Офлайн (Супермаркет)</span>
-              </>
-            ) : (
-              <>
-                <Wifi className="h-3.5 w-3.5 text-emerald-400" />
-                <span>В мережі (Online)</span>
-              </>
-            )}
-          </button>
+          <Badge variant="outline" className="flex items-center gap-1.5 text-xs text-emerald-400 border-emerald-800/60 bg-emerald-950/30">
+            <Database className="h-3.5 w-3.5 text-emerald-400" />
+            <span>PostgreSQL Synced</span>
+          </Badge>
 
           <Button
-            variant={offlineChanges > 0 ? 'default' : 'outline'}
+            variant="outline"
             size="sm"
             loading={isSyncing || isLoading}
-            icon={<RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />}
-            onClick={handleSync}
-            disabled={isOffline || isSyncing}
+            icon={<RefreshCw className={`h-3.5 w-3.5 ${isLoading || isSyncing ? 'animate-spin' : ''}`} />}
+            onClick={handleRefresh}
+            disabled={isSyncing || isLoading}
             className="text-xs"
           >
-            {offlineChanges > 0
-              ? `Синхронізувати (${offlineChanges})`
-              : 'Синхронізовано'}
+            Оновити
           </Button>
         </div>
       </div>
-
-      {/* Offline Status Alert if offline */}
-      {isOffline && (
-        <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-800/40 flex items-center justify-between gap-3 text-xs text-amber-300 animate-fade-in">
-          <div className="flex items-center gap-2">
-            <WifiOff className="h-4 w-4 shrink-0 text-amber-400" />
-            <span>
-              <strong>Режим офлайн активний:</strong> Ви можете відмічати товари та додавати нові без інтернет-з&apos;єднання.
-              Зміни надійно зберігаються в пам&apos;яті браузера.
-            </span>
-          </div>
-          <Badge variant="offline" dot>
-            OFFLINE_FIRST
-          </Badge>
-        </div>
-      )}
 
       {/* Quick Add Bar */}
       <Card className="border-zinc-800/80 bg-zinc-950/70">

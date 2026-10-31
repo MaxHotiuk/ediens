@@ -112,10 +112,7 @@ export function MacroTrackerView({ onShowToast }: MacroTrackerViewProps) {
 
   const handleDeleteMeal = async (id: string) => {
     try {
-      const res = await fetch(`/api/v1/meals/${id}`, { method: 'DELETE' });
-      if (!res.ok && res.status !== 404) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      await ediensApi.meals.deleteMeal(id);
       setMeals((prev) => prev.filter((m) => m.id !== id));
       onShowToast('Запис видалено', 'Калорії та макроси повернено до доступного бюджету.', 'info');
       await loadData();

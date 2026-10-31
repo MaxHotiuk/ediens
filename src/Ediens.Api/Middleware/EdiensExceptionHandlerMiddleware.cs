@@ -60,6 +60,21 @@ public class EdiensExceptionHandlerMiddleware
                     };
                     await WriteProblemResponseAsync(context, StatusCodes.Status405MethodNotAllowed, methodProblem);
                 }
+                else if (context.Response.StatusCode == StatusCodes.Status400BadRequest && (context.Response.ContentLength == null || context.Response.ContentLength == 0))
+                {
+                    var badRequestProblem = new EdiensProblemDetails
+                    {
+                        Type = "https://ediens.app/errors/validation-failed",
+                        Title = "One or more validation errors occurred.",
+                        Status = StatusCodes.Status400BadRequest,
+                        Detail = "Invalid request payload or malformed fields.",
+                        Instance = context.Request.Path,
+                        ErrorCode = ErrorCodes.ValidationFailed,
+                        TraceId = Activity.Current?.Id ?? context.TraceIdentifier,
+                        Timestamp = DateTime.UtcNow.ToString("O")
+                    };
+                    await WriteProblemResponseAsync(context, StatusCodes.Status400BadRequest, badRequestProblem);
+                }
             }
         }
         catch (DbUpdateConcurrencyException ex)
