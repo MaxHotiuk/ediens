@@ -1,9 +1,9 @@
 {
   "id": "FIX-01",
   "title": "Backend Real DB Persistence, Seeding & CORS/Headers",
-  "status": "TODO",
-  "assigned_to": null,
-  "updated_at": "2026-10-31T11:45:00Z",
+  "status": "IN_PROGRESS",
+  "assigned_to": "Maxs-MacBook-Air",
+  "updated_at": "2026-10-31T09:47:33Z",
   "branch": "fix/FIX-01-backend-db-and-cors",
   "dependencies": [],
   "allowed_paths": [
