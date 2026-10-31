@@ -41,20 +41,42 @@ export function RecipeRecommendationView({
     loadRecipes();
   }, [loadRecipes]);
 
-  const handleCook = async (recipe: Recipe) => {
+  const handleCook = async (recipe: Recipe, servings: number = 1, mealType: string = 'Dinner') => {
     try {
       const result = await ediensApi.recipes.cookRecipe(recipe.id, {
         householdId: DEFAULT_HOUSEHOLD_ID,
-        servings: 1,
-        mealType: 'Dinner',
+        servings,
+        mealType,
       });
+
+      const mealTypeMap: Record<string, string> = {
+        Breakfast: 'Сніданок',
+        Lunch: 'Обід',
+        Dinner: 'Вечеря',
+        Snack: 'Перекус',
+      };
+      const mealTypeLabel = mealTypeMap[result.mealType || mealType] || result.mealType || mealType;
+      const actualServings = result.servingsCooked || servings;
+      const calories = result.loggedMacros?.calories ?? Math.round(recipe.totalCalories * servings);
+      const protein = result.loggedMacros?.protein ?? Number((recipe.totalProtein * servings).toFixed(1));
 
       onShowToast(
         '1-Click Cook виконано!',
-        `Страву «${recipe.title}» приготовано. Інгредієнти списано зі складу за FEFO, а КБЖВ (+${result?.loggedMacros?.calories ?? recipe.totalCalories} ккал, +${result?.loggedMacros?.protein ?? recipe.totalProtein}г білка) додано до щоденника.`,
+        `Страву «${recipe.title}» (${actualServings} порц., ${mealTypeLabel}) успішно приготовано! Списано запаси за FEFO, а КБЖВ (+${calories} ккал, +${protein}г білка) додано до щоденника.`,
         'success'
       );
-      await loadRecipes();
+
+      // Refresh recipes recommendations, inventory stock, and macro progress
+      await Promise.allSettled([
+        loadRecipes(),
+        ediensApi.inventory.getItems({ householdId: DEFAULT_HOUSEHOLD_ID }),
+        ediensApi.nutrition.getProgress(),
+      ]);
+
+      // Broadcast events so other views/tabs also refresh
+      window.dispatchEvent(new CustomEvent('ediens:refresh-data'));
+      window.dispatchEvent(new CustomEvent('ediens:inventory-updated'));
+      window.dispatchEvent(new CustomEvent('ediens:macros-updated'));
     } catch (err: unknown) {
       if (err instanceof EdiensApiError && err.status === 422) {
         const ext = err.problem?.extensions as Record<string, unknown> | undefined;
@@ -185,7 +207,22 @@ export function RecipeRecommendationView({
       {/* Recipes Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filteredRecipes.map((recipe) => (
-          <RecipeCard key={recipe.id} recipe={recipe} onCook={handleCook} />
+          <RecipeCard
+            key={recipe.id}
+            recipe={recipe}
+            onCook={handleCook}
+            onAddShortfall={async (items) => {
+              await handleAddToShoppingList(
+                items.map((i) => ({
+                  productId: i.productId,
+                  productName: i.productName,
+                  requiredQuantity: i.requiredQuantity,
+                  availableQuantity: i.availableQuantity,
+                  unit: i.unit,
+                }))
+              );
+            }}
+          />
         ))}
       </div>
 

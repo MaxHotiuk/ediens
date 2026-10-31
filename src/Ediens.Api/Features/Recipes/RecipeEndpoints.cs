@@ -86,7 +86,8 @@ public static class RecipeEndpoints
                         ProductName: ingredient.Product?.Name ?? "Інгредієнт",
                         Quantity: ingredient.Quantity,
                         Unit: ingredient.Unit,
-                        IsAvailable: isAvailable
+                        IsAvailable: isAvailable,
+                        AvailableQuantity: availableQty
                     ));
 
                     // Перевіряємо, чи є партії, термін яких збігає < 72 годин
@@ -298,7 +299,8 @@ public static class RecipeEndpoints
                 MealLogId: mealLogId,
                 ServingsCooked: request.Servings,
                 DeductedBatches: deductedBatches,
-                LoggedMacros: new MacroBudgetValues(mealCalories, mealProtein, mealFat, mealCarbs)
+                LoggedMacros: new MacroBudgetValues(mealCalories, mealProtein, mealFat, mealCarbs),
+                MealType: request.MealType
             );
 
             return Results.Ok(response);

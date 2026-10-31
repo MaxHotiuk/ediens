@@ -131,6 +131,7 @@ export interface CookRecipeResponsePayload {
   recipeId: string;
   mealLogId: string;
   servingsCooked: number;
+  mealType?: string;
   message?: string;
   deductedBatches: Array<{
     batchId: string;
@@ -385,6 +386,7 @@ export const ediensApi = {
       });
       return {
         ...res.data,
+        mealType: res.data.mealType || payload.mealType,
         success: res.data.success ?? true,
       };
     },
