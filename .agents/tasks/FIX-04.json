@@ -1,0 +1,36 @@
+{
+  "id": "FIX-04",
+  "title": "End-to-End Fix: Meals, Macros & Smart Recipes Slices (Backend + Frontend)",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": "2026-10-31T11:45:00Z",
+  "branch": "fix/FIX-04-e2e-macros-and-recipes",
+  "dependencies": [
+    "FIX-01",
+    "FIX-02"
+  ],
+  "allowed_paths": [
+    "src/Ediens.Api/Features/Meals/**",
+    "src/Ediens.Api/Features/Nutrition/**",
+    "src/Ediens.Api/Features/Recipes/**",
+    "src/ediens-web/src/features/macros/**",
+    "src/ediens-web/src/features/recipes/**"
+  ],
+  "deliverables": [
+    "src/Ediens.Api/Features/Nutrition/NutritionEndpoints.cs",
+    "src/Ediens.Api/Features/Meals/MealEndpoints.cs",
+    "src/Ediens.Api/Features/Recipes/RecipeEndpoints.cs",
+    "src/ediens-web/src/features/macros/MacroTrackerView.tsx",
+    "src/ediens-web/src/features/macros/MealLogForm.tsx",
+    "src/ediens-web/src/features/recipes/RecipeRecommendationView.tsx"
+  ],
+  "acceptance_criteria": [
+    "Delete all mock data arrays and localStorage stores for nutrition targets, meals, and recipes.",
+    "MacroTrackerView loads live targets via GET /api/v1/nutrition/targets and updates targets via PUT /api/v1/nutrition/targets.",
+    "Implement GET /api/v1/meals in backend to fetch daily logged meals, and hook up MealHistoryList to render server data.",
+    "MealLogForm submits to POST /api/v1/meals/log with Idempotency-Key and recalculates daily macro budget from server response.",
+    "RecipeRecommendationView fetches ranked recipes from GET /api/v1/recipes/recommendations?householdId=...",
+    "1-Click Cook executes POST /api/v1/recipes/{id}/cook with real householdId and servings, atomically deducting FEFO stock in DB and returning remaining budget.",
+    "If ingredients are insufficient, backend returns 422 INSUFFICIENT_INVENTORY and UI displays MissingIngredientsModal with exact shortfall."
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "id": "FIX-05",
+  "title": "End-to-End Fix: Households & Shopping List Sync + OpenAPI Alignment",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": "2026-10-31T11:45:00Z",
+  "branch": "fix/FIX-05-e2e-households-and-openapi-sync",
+  "dependencies": [
+    "FIX-01",
+    "FIX-02"
+  ],
+  "allowed_paths": [
+    "src/Ediens.Api/Features/Households/**",
+    "src/Ediens.Api/Features/ShoppingList/**",
+    "src/ediens-web/src/features/household/**",
+    "src/ediens-web/src/features/shopping/**",
+    "src/ediens-web/src/features/shopping-list/**",
+    "docs/Ediens_OpenAPI.yaml"
+  ],
+  "deliverables": [
+    "src/Ediens.Api/Features/Households/HouseholdEndpoints.cs",
+    "src/Ediens.Api/Features/ShoppingList/ShoppingListEndpoints.cs",
+    "src/ediens-web/src/features/shopping/ShoppingListView.tsx",
+    "docs/Ediens_OpenAPI.yaml"
+  ],
+  "acceptance_criteria": [
+    "Implement GET /api/v1/households in backend returning the households the authenticated user belongs to (with member roles).",
+    "ShoppingListView fetches current list from GET /api/v1/households/{id}/shopping-list and removes mock SEED_SHOPPING_LIST.",
+    "Offline queue stores pending changes locally when offline; when toggled online, triggers POST /api/v1/households/{id}/shopping-list/sync with Last-Write-Wins timestamps.",
+    "Updating or checking off a shopping list item synchronizes with real DB table shopping_list_items.",
+    "Verify and update docs/Ediens_OpenAPI.yaml so 100% of routes, request schemas, and RFC 9457 responses match the final .NET API implementation."
+  ]
+}

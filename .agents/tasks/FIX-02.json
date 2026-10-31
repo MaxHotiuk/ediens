@@ -1,0 +1,31 @@
+{
+  "id": "FIX-02",
+  "title": "Frontend API Client, Vite Proxy & De-Mocking Core",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": "2026-10-31T11:45:00Z",
+  "branch": "fix/FIX-02-frontend-api-client-and-proxy",
+  "dependencies": [],
+  "allowed_paths": [
+    "src/ediens-web/vite.config.ts",
+    "src/ediens-web/.env*",
+    "src/ediens-web/src/api/**",
+    "src/ediens-web/src/hooks/**",
+    "src/ediens-web/src/features/store/**"
+  ],
+  "deliverables": [
+    "src/ediens-web/vite.config.ts",
+    "src/ediens-web/.env.example",
+    "src/ediens-web/.env",
+    "src/ediens-web/src/api/client.ts",
+    "src/ediens-web/src/api/errorHandler.ts"
+  ],
+  "acceptance_criteria": [
+    "Vite server.proxy in vite.config.ts routes /api to http://localhost:5158 (with fallback to 8080) matching .NET launchSettings and container configuration.",
+    ".env and .env.example created with VITE_API_URL=/api/v1 and VITE_DEFAULT_HOUSEHOLD_ID=0192e2b0-8812-7001-9011-aa9988776655.",
+    "src/api/client.ts aligns with .NET Minimal API DTOs: getItems unwraps { items: [...] }, cookRecipe sends { householdId, servings, mealType }, shopping list sync sends { lastSyncTimestamp, clientChanges }.",
+    "Request interceptor attaches W3C TraceContext traceparent and Idempotency-Key headers using crypto.randomUUID().",
+    "Response interceptor extracts ETag header from HTTP response and attaches it to response objects for Optimistic Concurrency Control.",
+    "Error interceptor correctly translates Axios errors into EdiensApiError containing RFC 9457 ProblemDetails and emits to errorBus."
+  ]
+}

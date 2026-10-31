@@ -1,0 +1,35 @@
+{
+  "id": "FIX-06",
+  "title": "Docker Compose Full-Stack Integration & E2E Smoke Verification",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": "2026-10-31T11:45:00Z",
+  "branch": "fix/FIX-06-docker-e2e-verification",
+  "dependencies": [
+    "FIX-03",
+    "FIX-04",
+    "FIX-05"
+  ],
+  "allowed_paths": [
+    "compose.yaml",
+    "Dockerfile*",
+    "infra/**",
+    "scripts/**",
+    "src/Ediens.Tests/**",
+    "docs/VERIFICATION.md"
+  ],
+  "deliverables": [
+    "compose.yaml",
+    "infra/nginx/nginx.conf",
+    "scripts/verify.sh",
+    "scripts/smoke-test.sh",
+    "docs/VERIFICATION.md"
+  ],
+  "acceptance_criteria": [
+    "Validate Docker Compose multi-container stack: postgres, redis, ediens-api, and ediens-web cleanly start and communicate over ediens-network.",
+    "Nginx in ediens-web container properly proxies /api/ to http://ediens-api:8080/api/ preserving If-Match, Idempotency-Key, and traceparent headers.",
+    "Completely remove any remaining mock references or legacy mock stores from the repository.",
+    "Run ./scripts/smoke-test.sh against live stack with 100% passing tests for health, ping, all 10 OpenAPI endpoints, and 400/403/404/409/422/429 RFC 9457 error contracts.",
+    "Run ./scripts/verify.sh with exit code 0 and document final end-to-end verification report in docs/VERIFICATION.md."
+  ]
+}
