@@ -1,9 +1,9 @@
 {
   "id": "QOL-05",
   "title": "Interactive Household Switcher, Member Management & Invite Code Sharing",
-  "status": "IN_PROGRESS",
+  "status": "DONE",
   "assigned_to": "voyager-ASUS",
-  "updated_at": "2026-11-01T08:16:14Z",
+  "updated_at": "2026-11-01T08:24:50Z",
   "branch": "feat/QOL-05-household-switcher-and-invites",
   "dependencies": [
     "FIX-07"
