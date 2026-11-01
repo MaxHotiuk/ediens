@@ -222,6 +222,14 @@ export interface TransferShoppingListResponsePayload {
   message: string;
 }
 
+export interface UpdateInventoryItemRequest {
+  quantityDelta?: number;
+  quantity?: number;
+  location?: StorageLocation | string;
+  expiresAt?: string;
+  markOpened?: boolean;
+}
+
 // ============================================================================
 // Type-Safe API Modules
 // ============================================================================
@@ -273,6 +281,19 @@ export const ediensApi = {
       return res.data;
     },
 
+    async updateItem(
+      id: string,
+      request: UpdateInventoryItemRequest,
+      etag?: string
+    ): Promise<InventoryItem> {
+      const config: AxiosRequestConfig = {};
+      if (etag) {
+        config.headers = { 'If-Match': etag };
+      }
+      const res = await axiosInstance.patch<InventoryItem>(`/inventory/items/${id}`, request, config);
+      return res.data;
+    },
+
     async updateQuantity(
       id: string,
       request: UpdateInventoryItemQuantityRequest,
@@ -286,8 +307,10 @@ export const ediensApi = {
       return res.data;
     },
 
-    async deleteItem(id: string): Promise<void> {
-      await axiosInstance.delete(`/inventory/items/${id}`);
+    async deleteItem(id: string, reason?: string): Promise<void> {
+      await axiosInstance.delete(`/inventory/items/${id}`, {
+        params: reason ? { reason } : undefined,
+      });
     },
   },
 

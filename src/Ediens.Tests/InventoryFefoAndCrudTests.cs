@@ -99,4 +99,83 @@ public class InventoryFefoAndCrudTests : IClassFixture<EdiensTestApplication>
         var getResponse = await client.GetAsync($"/api/v1/inventory/items/{created.Id}");
         Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
     }
+
+    [Fact]
+    public async Task UpdateInventoryItem_LocationExpirationAndQuantity_Succeeds()
+    {
+        var client = _app.CreateUserClient(DatabaseSeeder.OlegUserId);
+
+        var createResponse = await client.PostAsJsonAsync("/api/v1/inventory/items", new CreateInventoryItemRequest(
+            HouseholdId: DatabaseSeeder.MainHouseholdId,
+            ProductId: DatabaseSeeder.MilkProductId,
+            ProductName: "Масло вершкове 82%",
+            Location: "Fridge",
+            Quantity: 400m,
+            Unit: "g",
+            ExpiresAt: DateTime.UtcNow.AddDays(5)
+        ));
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+
+        var created = await createResponse.Content.ReadFromJsonAsync<InventoryItemResponse>();
+        Assert.NotNull(created);
+
+        var newExpiration = DateTime.UtcNow.AddDays(30);
+        var patchMessage = new HttpRequestMessage(HttpMethod.Patch, $"/api/v1/inventory/items/{created.Id}")
+        {
+            Content = JsonContent.Create(new UpdateInventoryItemRequest(
+                Quantity: 300m,
+                Location: "Freezer",
+                ExpiresAt: newExpiration
+            ))
+        };
+        patchMessage.Headers.Add("If-Match", created.Etag);
+
+        var patchResponse = await client.SendAsync(patchMessage);
+        Assert.Equal(HttpStatusCode.OK, patchResponse.StatusCode);
+
+        var updated = await patchResponse.Content.ReadFromJsonAsync<InventoryItemResponse>();
+        Assert.NotNull(updated);
+        Assert.Equal("Freezer", updated.Location);
+        Assert.Equal(300m, updated.Quantity);
+        Assert.True(patchResponse.Headers.Contains("ETag"));
+        Assert.NotEqual(created.Etag, updated.Etag);
+    }
+
+    [Fact]
+    public async Task UpdateInventoryItem_DropToZero_CleansUpItemFromDatabase()
+    {
+        var client = _app.CreateUserClient(DatabaseSeeder.OlegUserId);
+
+        var createResponse = await client.PostAsJsonAsync("/api/v1/inventory/items", new CreateInventoryItemRequest(
+            HouseholdId: DatabaseSeeder.MainHouseholdId,
+            ProductId: DatabaseSeeder.MilkProductId,
+            ProductName: "Йогурт грецький",
+            Location: "Fridge",
+            Quantity: 150m,
+            Unit: "g",
+            ExpiresAt: DateTime.UtcNow.AddDays(3)
+        ));
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+
+        var created = await createResponse.Content.ReadFromJsonAsync<InventoryItemResponse>();
+        Assert.NotNull(created);
+
+        // Знижуємо кількість рівно до 0 через PATCH
+        var patchMessage = new HttpRequestMessage(HttpMethod.Patch, $"/api/v1/inventory/items/{created.Id}")
+        {
+            Content = JsonContent.Create(new UpdateInventoryItemRequest(Quantity: 0m))
+        };
+        patchMessage.Headers.Add("If-Match", created.Etag);
+
+        var patchResponse = await client.SendAsync(patchMessage);
+        Assert.Equal(HttpStatusCode.OK, patchResponse.StatusCode);
+
+        var updated = await patchResponse.Content.ReadFromJsonAsync<InventoryItemResponse>();
+        Assert.NotNull(updated);
+        Assert.Equal(0m, updated.Quantity);
+
+        // Перевіряємо, що запис видалено з бази і більше не повертається по ID
+        var getResponse = await client.GetAsync($"/api/v1/inventory/items/{created.Id}");
+        Assert.Equal(HttpStatusCode.NotFound, getResponse.StatusCode);
+    }
 }
