@@ -15,11 +15,17 @@ import {
   ShieldAlert,
   Wifi,
   WifiOff,
-  Home,
   CheckCircle,
 } from 'lucide-react';
 import { ErrorListeners } from './api/errorHandler';
-import { generateUuid } from './api/client';
+import {
+  generateUuid,
+  HouseholdSummary,
+  setActiveHouseholdId,
+  DEFAULT_HOUSEHOLD_ID,
+} from './api/client';
+import { HouseholdSelector } from './features/household/HouseholdSelector';
+import { HouseholdModal } from './features/household/HouseholdModal';
 // Page Views
 import { InventoryPage } from './pages/InventoryPage';
 import { MacroTrackerPage } from './pages/MacroTrackerPage';
@@ -55,6 +61,44 @@ export function App() {
 
   // Spec Info Modal
   const [isSpecModalOpen, setIsSpecModalOpen] = useState(false);
+
+  // Active Household & Modal State
+  const [activeHousehold, setActiveHousehold] = useState<HouseholdSummary | null>(null);
+  const [activeHouseholdId, setActiveHouseholdIdState] = useState<string>(() => {
+    if (typeof sessionStorage !== 'undefined') {
+      const saved = sessionStorage.getItem('ediens_active_household_id');
+      if (saved) return saved;
+    }
+    return DEFAULT_HOUSEHOLD_ID;
+  });
+  const [isHouseholdModalOpen, setIsHouseholdModalOpen] = useState(false);
+  const [householdRefreshTrigger, setHouseholdRefreshTrigger] = useState(0);
+
+  // Sync active household id on initial load if present in sessionStorage
+  useEffect(() => {
+    if (activeHouseholdId && activeHouseholdId !== DEFAULT_HOUSEHOLD_ID) {
+      setActiveHouseholdId(activeHouseholdId);
+    }
+  }, [activeHouseholdId]);
+
+  const handleSelectHousehold = (household: HouseholdSummary) => {
+    setActiveHousehold(household);
+    setActiveHouseholdIdState(household.id);
+    setActiveHouseholdId(household.id);
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('ediens_active_household_id', household.id);
+    }
+    addToast({
+      title: 'Активне домогосподарство змінено',
+      description: `Перемкнуто на "${household.name}" (${household.role}).`,
+      variant: 'info',
+    });
+  };
+
+  const handleHouseholdJoined = (newHousehold: HouseholdSummary) => {
+    handleSelectHousehold(newHousehold);
+    setHouseholdRefreshTrigger((prev) => prev + 1);
+  };
 
   // Connectivity state
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -192,9 +236,6 @@ export function App() {
               <div className="text-left hidden sm:block">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-base tracking-tight text-white">ēdiens</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-zinc-800">
-                    TASK-07
-                  </span>
                 </div>
                 <p className="text-[11px] text-zinc-400 leading-none">
                   Єдиний хаб запасів, макросів та рецептів
@@ -202,12 +243,17 @@ export function App() {
               </div>
             </button>
 
-            {/* Household Badge */}
-            <div className="hidden md:flex items-center gap-1.5 text-xs text-zinc-400 bg-zinc-900/80 border border-zinc-800 px-2.5 py-1 rounded-lg ml-2">
-              <Home className="h-3.5 w-3.5 text-sky-400" />
-              <span>Поділ, вул. Спаська</span>
-              <span className="text-[10px] text-zinc-500 font-mono">(Owner)</span>
-            </div>
+            {/* Interactive Live Household Selector */}
+            <HouseholdSelector
+              activeHouseholdId={activeHouseholdId}
+              onSelectHousehold={handleSelectHousehold}
+              onOpenManageModal={() => setIsHouseholdModalOpen(true)}
+              onShowToast={(title, description, variant) =>
+                addToast({ title, description, variant })
+              }
+              refreshTrigger={householdRefreshTrigger}
+              className="ml-1"
+            />
           </div>
 
           {/* Central Navigation Tabs */}
@@ -301,6 +347,7 @@ export function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
         {activeTab === 'inventory' && (
           <InventoryPage
+            key={activeHouseholdId}
             onShowToast={(title, description, variant) =>
               addToast({ title, description, variant })
             }
@@ -309,6 +356,7 @@ export function App() {
 
         {activeTab === 'macros' && (
           <MacroTrackerPage
+            key={activeHouseholdId}
             onShowToast={(title, description, variant) =>
               addToast({ title, description, variant })
             }
@@ -317,6 +365,7 @@ export function App() {
 
         {activeTab === 'recipes' && (
           <RecipesPage
+            key={activeHouseholdId}
             onShowToast={(title, description, variant) =>
               addToast({ title, description, variant })
             }
@@ -326,6 +375,7 @@ export function App() {
 
         {activeTab === 'shopping' && (
           <ShoppingListPage
+            key={activeHouseholdId}
             onShowToast={(title, description, variant) =>
               addToast({ title, description, variant })
             }
@@ -433,6 +483,17 @@ export function App() {
           </div>
         </div>
       </Modal>
+
+      {/* Household Management & Invites Modal */}
+      <HouseholdModal
+        isOpen={isHouseholdModalOpen}
+        onClose={() => setIsHouseholdModalOpen(false)}
+        activeHousehold={activeHousehold}
+        onHouseholdJoined={handleHouseholdJoined}
+        onShowToast={(title, description, variant) =>
+          addToast({ title, description, variant })
+        }
+      />
 
       {/* Global Toast Notifications */}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />

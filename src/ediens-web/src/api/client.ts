@@ -20,6 +20,23 @@ import {
   FreshnessStatus,
 } from '../types/api';
 
+export interface HouseholdSummary {
+  id: string;
+  name: string;
+  inviteCode: string;
+  role: string;
+  membersCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HouseholdMember {
+  userId: string;
+  email: string;
+  role: string;
+  joinedAt: string;
+}
+
 // Generates RFC 4122 v4 UUID for Idempotency-Key & traceparent using crypto.randomUUID()
 export function generateUuid(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -43,8 +60,16 @@ function generateTraceparent(): string {
 
 // Environment or default base API URL
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';
-export const DEFAULT_HOUSEHOLD_ID =
+export let DEFAULT_HOUSEHOLD_ID =
   import.meta.env.VITE_DEFAULT_HOUSEHOLD_ID || '0192e2b0-8812-7001-9011-aa9988776655';
+
+export function getActiveHouseholdId(): string {
+  return DEFAULT_HOUSEHOLD_ID;
+}
+
+export function setActiveHouseholdId(id: string): void {
+  DEFAULT_HOUSEHOLD_ID = id;
+}
 
 export const axiosInstance: AxiosInstance = axios.create({
   baseURL: BASE_URL,
@@ -131,6 +156,7 @@ export interface CookRecipeResponsePayload {
   recipeId: string;
   mealLogId: string;
   servingsCooked: number;
+  mealType?: string;
   message?: string;
   deductedBatches: Array<{
     batchId: string;
@@ -385,6 +411,7 @@ export const ediensApi = {
       });
       return {
         ...res.data,
+        mealType: res.data.mealType || payload.mealType,
         success: res.data.success ?? true,
       };
     },
@@ -495,8 +522,23 @@ export const ediensApi = {
    * Households Module
    */
   households: {
-    async getHouseholds(): Promise<Array<{ id: string; name: string; role?: string }>> {
-      const res = await axiosInstance.get<Array<{ id: string; name: string; role?: string }>>('/households');
+    async getHouseholds(): Promise<HouseholdSummary[]> {
+      const res = await axiosInstance.get<HouseholdSummary[]>('/households');
+      return res.data;
+    },
+
+    async getHouseholdById(id: string): Promise<HouseholdSummary> {
+      const res = await axiosInstance.get<HouseholdSummary>(`/households/${id}`);
+      return res.data;
+    },
+
+    async joinHousehold(inviteCode: string): Promise<HouseholdSummary> {
+      const res = await axiosInstance.post<HouseholdSummary>('/households/join', { inviteCode });
+      return res.data;
+    },
+
+    async getMembers(householdId: string): Promise<HouseholdMember[]> {
+      const res = await axiosInstance.get<HouseholdMember[]>(`/households/${householdId}/members`);
       return res.data;
     },
   },

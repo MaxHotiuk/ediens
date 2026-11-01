@@ -8,7 +8,8 @@ public record RecipeIngredientDto(
     [property: JsonPropertyName("productName")] string ProductName,
     [property: JsonPropertyName("quantity")] decimal Quantity,
     [property: JsonPropertyName("unit")] string Unit,
-    [property: JsonPropertyName("isAvailable")] bool IsAvailable
+    [property: JsonPropertyName("isAvailable")] bool IsAvailable,
+    [property: JsonPropertyName("availableQuantity")] decimal AvailableQuantity = 0
 );
 
 public record RecipeRecommendationItem(
@@ -72,5 +73,6 @@ public record CookRecipeResponse(
     [property: JsonPropertyName("mealLogId")] Guid MealLogId,
     [property: JsonPropertyName("servingsCooked")] int ServingsCooked,
     [property: JsonPropertyName("deductedBatches")] List<CookedBatchDeduction> DeductedBatches,
-    [property: JsonPropertyName("loggedMacros")] MacroBudgetValues LoggedMacros
+    [property: JsonPropertyName("loggedMacros")] MacroBudgetValues LoggedMacros,
+    [property: JsonPropertyName("mealType")] string MealType = "Dinner"
 );
