@@ -13,10 +13,21 @@ public record CreateInventoryItemRequest(
     [property: JsonPropertyName("openedAt")] DateTime? OpenedAt = null
 );
 
-public record UpdateInventoryItemQuantityRequest(
-    [property: JsonPropertyName("quantityDelta")] decimal QuantityDelta,
+public record UpdateInventoryItemRequest(
+    [property: JsonPropertyName("quantityDelta"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? QuantityDelta = null,
+    [property: JsonPropertyName("quantity"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? Quantity = null,
+    [property: JsonPropertyName("location"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Location = null,
+    [property: JsonPropertyName("expiresAt"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTime? ExpiresAt = null,
     [property: JsonPropertyName("markOpened")] bool MarkOpened = false
 );
+
+public record UpdateInventoryItemQuantityRequest : UpdateInventoryItemRequest
+{
+    public UpdateInventoryItemQuantityRequest(decimal quantityDelta, bool MarkOpened = false)
+        : base(QuantityDelta: quantityDelta, MarkOpened: MarkOpened)
+    {
+    }
+}
 
 public record InventoryItemResponse(
     [property: JsonPropertyName("id")] Guid Id,

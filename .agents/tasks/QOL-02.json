@@ -1,9 +1,9 @@
 {
   "id": "QOL-02",
   "title": "Inventory Batch Editing, Location Relocation & Quick Spoiled Disposal",
-  "status": "IN_PROGRESS",
+  "status": "DONE",
   "assigned_to": "voyager-ASUS",
-  "updated_at": "2026-10-31T22:13:55Z",
+  "updated_at": "2026-11-01T15:45:20Z",
   "branch": "feat/QOL-02-inventory-edit-and-spoilage",
   "dependencies": [
     "FIX-07"
