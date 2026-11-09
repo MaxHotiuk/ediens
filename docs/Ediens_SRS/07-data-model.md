@@ -1,18 +1,19 @@
 # 07. Модель даних (Data Model)
 
-> **Статус:** Офіційний реліз базової специфікації (Baseline)  
-> **Модуль SRS:** Розділ 07  
-> **Зв'язок із завданнями:** TASK-01  
-> **Стандарти:** PostgreSQL 17 Enterprise Guidelines, Entity Framework Core 10, RFC 9457
+> **Статус:** Офіційний реліз розширеної інженерної специфікації (Baseline)  
+> **Версія:** 2.0.0  
+> **Модуль SRS:** Розділ 07 (Relational PostgreSQL Schema, UUIDv7, xmin Concurrency, Data Retention & GDPR Purge)  
+> **Зв'язок із завданнями:** DOC-01, TASK-01, FR-01..FR-12, NFR-02, NFR-04  
+> **Стандарти:** PostgreSQL 16/17 Enterprise Guidelines, Entity Framework Core 10, RFC 9457, GDPR EU 2016/679
 
 ---
 
 ## 1. Архітектурні принципи моделі даних
 
-Модель даних системи **ēdiens** спроектована з урахуванням високих вимог до строгої консистентності, масштабованості, захисту від колізій конкурентного доступу та низьких затримок читання за принципом **FEFO** (*First Expired, First Out*).
+Модель даних системи **ēdiens** спроектована з урахуванням високих вимог до строгої узгодженості (**Strong ACID Consistency**), високої продуктивності операцій за принципом **FEFO** (*First Expired, First Out*), оптимістичного блокування без штучних версій за допомогою системного **`xmin`** у PostgreSQL та суворої мультитенантної ізоляції домогосподарств.
 
 ### Ключові принципи та конвенції:
-1. **Стратегія первинних ключів (UUIDv7):** Для всіх сутностей використовується тип `uuid` з генерацією за стандартом **UUIDv7**. Завдяки вбудованій мітці часу в старших бітах (Unix Epoch timestamp) UUIDv7 забезпечує монотонне зростання ключів, що запобігає фрагментації B-Tree індексів у PostgreSQL і забезпечує швидкість вставки на рівні цілочисельних ключів `bigserial`, зберігаючи глобальну унікальність у розподіленому середовищі.
+1. **Стратегія первинних ключів (UUIDv7):** Для всіх сутностей використовується тип `uuid` з генерацією за стандартом **UUIDv7** (RFC 9562). Завдяки вбудованій мітці часу в старших 48 бітах (Unix Epoch timestamp) UUIDv7 забезпечує монотонне зростання ключів. Це повністю запобігає фрагментації сторінок B-Tree індексів у PostgreSQL і забезпечує швидкість вставки на рівні `bigserial`, зберігаючи глобальну унікальність у розподіленому середовищі.
 2. **Єдиний часовий простір (UTC Timestamps):** Усі поля дати та часу зберігаються виключно в типі `TIMESTAMP WITH TIME ZONE` (`TIMESTAMPTZ`) за шкалою UTC. Локальний час користувача враховується виключно на рівні клієнтського представлення.
 3. **Строгий інваріант невід'ємних залишків:** Складські залишки не можуть набувати від'ємних значень за жодних обставин. Інваріант закріплено на рівні ядра СУБД декларативним перевірочним обмеженням: `CHECK (quantity >= 0)`.
 4. **Багатоорендна ізоляція (Tenant Scoping):** Таблиці інвентарю, списків покупок та рецептів домогосподарств мають зовнішній ключ `household_id`. Персональні щоденники харчування та добові цілі макронутрієнтів ізольовані за `user_id`.
@@ -24,7 +25,7 @@
 
 ## 2. ER-діаграма системи (Entity-Relationship Diagram)
 
-Нижче наведено повну схему взаємозв'язків між 13 реляційними сутностями системи у синтаксисі Mermaid `erDiagram`.
+Нижче наведено повну схему взаємозв'язків між усіма реляційними сутностями системи у синтаксисі Mermaid `erDiagram`, включно з PK, FK, UK та токеном конкурентності `xmin`.
 
 ```mermaid
 erDiagram
@@ -32,22 +33,20 @@ erDiagram
     users ||--o{ nutrition_targets : "has daily targets"
     users ||--o{ meal_logs : "logs consumption"
     users ||--o{ shopping_list_items : "adds items"
+    users ||--o{ idempotency_records : "issues requests"
 
     households ||--|{ household_members : "contains"
-    households ||--o{ inventory_items : "owns stock"
+    households ||--o{ inventory_batches : "owns stock batches"
     households ||--o{ recipes : "creates custom"
     households ||--o{ shopping_list_items : "manages list"
 
-    products ||--o{ inventory_items : "stocked as batches"
+    products ||--o{ inventory_batches : "stocked as batches"
     products ||--o{ recipe_ingredients : "is component of"
     products ||--o{ meal_log_items : "logged in meal"
     products ||--o{ shopping_list_items : "optional product link"
 
     recipes ||--|{ recipe_ingredients : "consists of"
-
     meal_logs ||--|{ meal_log_items : "details"
-
-    users ||--o{ idempotency_records : "issues requests"
 
     users {
         uuid id PK "UUIDv7"
@@ -68,7 +67,7 @@ erDiagram
     household_members {
         uuid household_id PK, FK "Household Reference"
         uuid user_id PK, FK "User Reference"
-        varchar role "Owner or Member"
+        varchar role "Owner, Editor, Guest"
         timestamptz joined_at "UTC"
     }
 
@@ -76,7 +75,7 @@ erDiagram
         uuid id PK "UUIDv7"
         varchar name "Product Title"
         varchar barcode UK "EAN-13 (Optional)"
-        varchar brand "Brand or Manufacturer"
+        varchar brand "Brand / Manufacturer"
         numeric calories_per_100g "kcal / 100g"
         numeric protein_per_100g "g / 100g"
         numeric fat_per_100g "g / 100g"
@@ -85,7 +84,7 @@ erDiagram
         timestamptz updated_at "UTC"
     }
 
-    inventory_items {
+    inventory_batches {
         uuid id PK "UUIDv7"
         uuid household_id FK "Tenant ID"
         uuid product_id FK "Product ID"
@@ -197,17 +196,19 @@ erDiagram
 
 ---
 
-## 3. Детальні специфікації таблиць та повний DDL (Data Definition Language)
+## 3. Детальні специфікації сутностей, схем таблиць, індексів та DDL
 
-Нижче наведено повний SQL DDL для створення таблиць, зовнішніх зв'язків, індексів та перевірочних обмежень у PostgreSQL 17+.
+Нижче наведено повний виробничий DDL для 8 основних сутностей домену, допоміжних сутностей та 2 системних таблиць інфраструктури.
 
 ```sql
--- Створення розширення для генерації UUID, якщо використовується системний виклик
+-- Створення необхідних криптографічних та розширень повнотекстового пошуку
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 -- ============================================================================
--- 1. ТАБЛИЦЯ: users
+-- 1. ТАБЛИЦЯ: users (Облікові записи користувачів)
 -- ============================================================================
+-- Призначення: Зберігання облікових записів, авторизаційних хешів та ідентифікаторів.
 CREATE TABLE users (
     id UUID PRIMARY KEY,
     email VARCHAR(255) NOT NULL,
@@ -216,11 +217,13 @@ CREATE TABLE users (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_users_email UNIQUE (email)
 );
-COMMENT ON TABLE users IS 'Облікові записи користувачів платформи';
+CREATE INDEX idx_users_email ON users(email);
+COMMENT ON TABLE users IS 'Облікові записи користувачів платформи ēdiens';
 
 -- ============================================================================
--- 2. ТАБЛИЦЯ: households
+-- 2. ТАБЛИЦЯ: households (Домогосподарства)
 -- ============================================================================
+-- Призначення: Одиниця багатоорендного (multi-tenant) володіння запасами та списками.
 CREATE TABLE households (
     id UUID PRIMARY KEY,
     name VARCHAR(150) NOT NULL,
@@ -232,26 +235,28 @@ CREATE TABLE households (
 COMMENT ON TABLE households IS 'Домогосподарства (одиниця спільного володіння запасами)';
 
 -- ============================================================================
--- 3. ТАБЛИЦЯ: household_members
+-- 3. ТАБЛИЦЯ: household_members (Членство в домогосподарствах та RBAC)
 -- ============================================================================
+-- Призначення: Зв'язок Many-to-Many між користувачами та домогосподарствами з ролями RBAC.
 CREATE TABLE household_members (
     household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     role VARCHAR(20) NOT NULL,
     joined_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (household_id, user_id),
-    CONSTRAINT ck_household_members_role CHECK (role IN ('Owner', 'Member'))
+    CONSTRAINT ck_household_members_role CHECK (role IN ('Owner', 'Editor', 'Guest'))
 );
 CREATE INDEX idx_household_members_user ON household_members(user_id);
 COMMENT ON TABLE household_members IS 'Зв''язок користувачів із домогосподарствами та їх ролі (RBAC)';
 
 -- ============================================================================
--- 4. ТАБЛИЦЯ: products
+-- 4. ТАБЛИЦЯ: products (Глобальний каталог продуктів харчування)
 -- ============================================================================
+-- Призначення: Еталонний довідник харчових продуктів із розрахунком КБЖВ на 100 грамів.
 CREATE TABLE products (
     id UUID PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    barcode VARCHAR(13) NULL,
+    barcode VARCHAR(14) NULL,
     brand VARCHAR(150) NULL,
     calories_per_100g NUMERIC(7, 2) NOT NULL,
     protein_per_100g NUMERIC(6, 2) NOT NULL,
@@ -267,13 +272,15 @@ CREATE TABLE products (
     )
 );
 CREATE UNIQUE INDEX idx_products_barcode ON products(barcode) WHERE barcode IS NOT NULL;
-CREATE INDEX idx_products_name_trgm ON products USING gin (to_tsvector('simple', name));
+CREATE INDEX idx_products_name_trgm ON products USING gin (name gin_trgm_ops);
 COMMENT ON TABLE products IS 'Глобальний каталог продуктів харчування та їх КБЖВ на 100 г';
 
 -- ============================================================================
--- 5. ТАБЛИЦЯ: inventory_items (Складські партії з токеном xmin)
+-- 5. ТАБЛИЦЯ: inventory_batches (Складські партії з токеном конкурентності xmin)
 -- ============================================================================
-CREATE TABLE inventory_items (
+-- Призначення: Партійний облік залишків продуктів у розрізі зон зберігання та термінів FEFO.
+-- Примітка: У моделі даних сутність також ідентифікується як inventory_items для зворотної сумісності.
+CREATE TABLE inventory_batches (
     id UUID PRIMARY KEY,
     household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
     product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
@@ -288,33 +295,60 @@ CREATE TABLE inventory_items (
     CONSTRAINT ck_inventory_unit CHECK (unit IN ('g', 'ml', 'pcs')),
     CONSTRAINT ck_inventory_quantity_non_negative CHECK (quantity >= 0)
 );
--- Частковий композитний індекс для блискавичного FEFO-сортування активних залишків
-CREATE INDEX idx_inventory_fefo ON inventory_items(household_id, expires_at ASC) WHERE quantity > 0;
-CREATE INDEX idx_inventory_product ON inventory_items(product_id);
-COMMENT ON TABLE inventory_items IS 'Складські партії продуктів у домогосподарствах з підтримкою FEFO';
+
+-- Композитний частковий FEFO-індекс: підтримує запити вибірки з сортуванням за найближчим терміном
+CREATE INDEX IX_inventory_household_expiry ON inventory_batches(household_id, expires_at ASC) WHERE quantity > 0;
+CREATE INDEX idx_inventory_product ON inventory_batches(product_id);
+COMMENT ON TABLE inventory_batches IS 'Складські партії продуктів у домогосподарствах з підтримкою FEFO';
+
+-- Аліас-представлення для сумісності з попередніми API контрактами
+CREATE OR REPLACE VIEW inventory_items AS SELECT *, xmin FROM inventory_batches;
 
 -- ============================================================================
--- 6. ТАБЛИЦЯ: nutrition_targets
+-- 6. ТАБЛИЦЯ: recipes (Каталог кулінарних рецептів)
 -- ============================================================================
-CREATE TABLE nutrition_targets (
+-- Призначення: Зберігання рецептів страв (глобальних або створених домогосподарством).
+CREATE TABLE recipes (
     id UUID PRIMARY KEY,
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    target_calories NUMERIC(7, 2) NOT NULL,
-    target_protein NUMERIC(6, 2) NOT NULL,
-    target_fat NUMERIC(6, 2) NOT NULL,
-    target_carbs NUMERIC(6, 2) NOT NULL,
-    effective_from DATE NOT NULL,
+    household_id UUID NULL REFERENCES households(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    instructions TEXT NOT NULL,
+    total_calories NUMERIC(7, 2) NOT NULL,
+    total_protein NUMERIC(6, 2) NOT NULL,
+    total_fat NUMERIC(6, 2) NOT NULL,
+    total_carbs NUMERIC(6, 2) NOT NULL,
+    prep_time_minutes INTEGER NOT NULL DEFAULT 15,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT ck_nutrition_targets_positive CHECK (
-        target_calories > 0 AND target_protein >= 0 AND target_fat >= 0 AND target_carbs >= 0
-    )
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_recipes_prep_time CHECK (prep_time_minutes >= 0)
 );
-CREATE INDEX idx_nutrition_targets_user ON nutrition_targets(user_id, effective_from DESC);
-COMMENT ON TABLE nutrition_targets IS 'Історія та поточні цільові добові норми КБЖВ користувачів';
+CREATE INDEX idx_recipes_household ON recipes(household_id);
+CREATE INDEX idx_recipes_title_trgm ON recipes USING gin (title gin_trgm_ops);
+COMMENT ON TABLE recipes IS 'Каталог кулінарних рецептів (глобальних або створених домогосподарством)';
 
 -- ============================================================================
--- 7. ТАБЛИЦЯ: meal_logs
+-- 7. ТАБЛИЦЯ: recipe_ingredients (Складові інгредієнти рецептів)
 -- ============================================================================
+-- Призначення: Зв'язок рецептів з продуктами та нормами витрат на базову порцію.
+CREATE TABLE recipe_ingredients (
+    id UUID PRIMARY KEY,
+    recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+    quantity NUMERIC(10, 2) NOT NULL,
+    unit VARCHAR(10) NOT NULL,
+    is_optional BOOLEAN NOT NULL DEFAULT FALSE,
+    CONSTRAINT ck_recipe_ingredients_quantity CHECK (quantity > 0),
+    CONSTRAINT ck_recipe_ingredients_unit CHECK (unit IN ('g', 'ml', 'pcs'))
+);
+CREATE INDEX idx_recipe_ingredients_recipe ON recipe_ingredients(recipe_id);
+CREATE INDEX idx_recipe_ingredients_product ON recipe_ingredients(product_id);
+COMMENT ON TABLE recipe_ingredients IS 'Компонентний склад рецептів із зазначенням необхідної ваги';
+
+-- ============================================================================
+-- 8. ТАБЛИЦЯ: meal_logs (Щоденник харчування та добового обліку макросів)
+-- ============================================================================
+-- Призначення: Персональні записи фактів споживання їжі користувачем.
 CREATE TABLE meal_logs (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -333,7 +367,7 @@ CREATE INDEX idx_meal_logs_user_date ON meal_logs(user_id, logged_at DESC);
 COMMENT ON TABLE meal_logs IS 'Щоденник фактичних прийомів їжі користувача';
 
 -- ============================================================================
--- 8. ТАБЛИЦЯ: meal_log_items
+-- 8a. ТАБЛИЦЯ: meal_log_items (Деталізація спожитих продуктів у прийомі їжі)
 -- ============================================================================
 CREATE TABLE meal_log_items (
     id UUID PRIMARY KEY,
@@ -352,46 +386,28 @@ CREATE INDEX idx_meal_log_items_parent ON meal_log_items(meal_log_id);
 COMMENT ON TABLE meal_log_items IS 'Деталізація інгредієнтів/продуктів у конкретному прийомі їжі';
 
 -- ============================================================================
--- 9. ТАБЛИЦЯ: recipes
+-- 8b. ТАБЛИЦЯ: nutrition_targets (Цільові щоденні норми КБЖВ)
 -- ============================================================================
-CREATE TABLE recipes (
+CREATE TABLE nutrition_targets (
     id UUID PRIMARY KEY,
-    household_id UUID NULL REFERENCES households(id) ON DELETE CASCADE,
-    title VARCHAR(255) NOT NULL,
-    description TEXT NOT NULL,
-    instructions TEXT NOT NULL,
-    total_calories NUMERIC(7, 2) NOT NULL,
-    total_protein NUMERIC(6, 2) NOT NULL,
-    total_fat NUMERIC(6, 2) NOT NULL,
-    total_carbs NUMERIC(6, 2) NOT NULL,
-    prep_time_minutes INTEGER NOT NULL DEFAULT 15,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target_calories NUMERIC(7, 2) NOT NULL,
+    target_protein NUMERIC(6, 2) NOT NULL,
+    target_fat NUMERIC(6, 2) NOT NULL,
+    target_carbs NUMERIC(6, 2) NOT NULL,
+    effective_from DATE NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT ck_recipes_prep_time CHECK (prep_time_minutes >= 0)
+    CONSTRAINT ck_nutrition_targets_positive CHECK (
+        target_calories > 0 AND target_protein >= 0 AND target_fat >= 0 AND target_carbs >= 0
+    )
 );
-CREATE INDEX idx_recipes_household ON recipes(household_id);
-COMMENT ON TABLE recipes IS 'Каталог кулінарних рецептів (глобальних або створених домогосподарством)';
+CREATE INDEX idx_nutrition_targets_user ON nutrition_targets(user_id, effective_from DESC);
+COMMENT ON TABLE nutrition_targets IS 'Історія та поточні цільові добові норми КБЖВ користувачів';
 
 -- ============================================================================
--- 10. ТАБЛИЦЯ: recipe_ingredients
+-- 9. ТАБЛИЦЯ: shopping_list_items (Спільний список покупок домогосподарства)
 -- ============================================================================
-CREATE TABLE recipe_ingredients (
-    id UUID PRIMARY KEY,
-    recipe_id UUID NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
-    product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
-    quantity NUMERIC(10, 2) NOT NULL,
-    unit VARCHAR(10) NOT NULL,
-    is_optional BOOLEAN NOT NULL DEFAULT FALSE,
-    CONSTRAINT ck_recipe_ingredients_quantity CHECK (quantity > 0),
-    CONSTRAINT ck_recipe_ingredients_unit CHECK (unit IN ('g', 'ml', 'pcs'))
-);
-CREATE INDEX idx_recipe_ingredients_recipe ON recipe_ingredients(recipe_id);
-CREATE INDEX idx_recipe_ingredients_product ON recipe_ingredients(product_id);
-COMMENT ON TABLE recipe_ingredients IS 'Компонентний склад рецептів із зазначенням необхідної ваги';
-
--- ============================================================================
--- 11. ТАБЛИЦЯ: shopping_list_items
--- ============================================================================
+-- Призначення: Список запланованих покупок з підтримкою версіонування для офлайн-синхронізації.
 CREATE TABLE shopping_list_items (
     id UUID PRIMARY KEY,
     household_id UUID NOT NULL REFERENCES households(id) ON DELETE CASCADE,
@@ -407,11 +423,12 @@ CREATE TABLE shopping_list_items (
     CONSTRAINT ck_shopping_list_quantity CHECK (quantity > 0)
 );
 CREATE INDEX idx_shopping_list_household ON shopping_list_items(household_id, is_purchased);
-COMMENT ON TABLE shopping_list_items IS 'Спільний список покупок домогосподарства з підтримкою векторних версій для офлайн-злиття';
+COMMENT ON TABLE shopping_list_items IS 'Спільний список покупок домогосподарства з векторними версіями для офлайн-злиття';
 
 -- ============================================================================
--- 12. ТАБЛИЦЯ: outbox_messages (Transactional Outbox Pattern)
+-- 10. СИСТЕМНА ТАБЛИЦЯ: outbox_messages (Transactional Outbox Pattern)
 -- ============================================================================
+-- Призначення: Гарантія надійної доставки доменних подій у межах транзакцій СУБД.
 CREATE TABLE outbox_messages (
     id UUID PRIMARY KEY,
     event_type VARCHAR(100) NOT NULL,
@@ -423,13 +440,13 @@ CREATE TABLE outbox_messages (
     processed_at TIMESTAMP WITH TIME ZONE NULL,
     CONSTRAINT ck_outbox_status CHECK (status IN ('PENDING', 'PROCESSED', 'FAILED'))
 );
--- Частковий індекс для надшвидкого вичитування черги нерозібраних подій
 CREATE INDEX idx_outbox_pending ON outbox_messages(created_at ASC) WHERE status = 'PENDING';
 COMMENT ON TABLE outbox_messages IS 'Таблиця патерну Transactional Outbox для асинхронної обробки подій';
 
 -- ============================================================================
--- 13. ТАБЛИЦЯ: idempotency_records (Idempotency Key Store)
+-- 11. СИСТЕМНА ТАБЛИЦЯ: idempotency_records (Idempotency Key Store)
 -- ============================================================================
+-- Призначення: Захист мутуючих операцій від подвійного виконання при збоях мережі.
 CREATE TABLE idempotency_records (
     idempotency_key VARCHAR(64) PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -445,256 +462,25 @@ COMMENT ON TABLE idempotency_records IS 'Реєстр виконаних іде�
 
 ---
 
-
-
-### 3.14 Канонічні JSON Payload Schemas та DTO-контракти сутностей
-
-Для забезпечення повної сумісності між API на .NET 10, веб-клієнтом React та сторонніми інтеграціями нижче наведено канонічні схеми запитів і відповідей у форматі JSON для всіх ключових сутностей системи.
-
-#### 1. Household DTOs (`Households`)
-- **Створення домогосподарства (`POST /api/v1/households`):**
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "CreateHouseholdRequest",
-  "type": "object",
-  "required": ["name"],
-  "properties": {
-    "name": {
-      "type": "string",
-      "minLength": 2,
-      "maxLength": 150,
-      "example": "Сім'я Коваленків"
-    }
-  }
-}
-```
-- **Відповідь з інформацією про домогосподарство (`HouseholdResponse`):**
-```json
-{
-  "id": "0192e2b3-5730-7432-8411-cf0b91d20001",
-  "name": "Сім'я Коваленків",
-  "inviteCode": "KOV-8821",
-  "memberCount": 3,
-  "currentUserRole": "Owner",
-  "createdAt": "2026-11-01T08:00:00Z",
-  "updatedAt": "2026-11-01T08:00:00Z"
-}
-```
-
-#### 2. User & Auth DTOs (`Users`)
-- **Профіль користувача (`UserResponse`):**
-```json
-{
-  "id": "0192e2b3-5730-7432-8411-cf0b91d20002",
-  "email": "maksym.kovalenko@example.com",
-  "households": [
-    {
-      "householdId": "0192e2b3-5730-7432-8411-cf0b91d20001",
-      "name": "Сім'я Коваленків",
-      "role": "Owner"
-    }
-  ],
-  "createdAt": "2026-10-15T12:00:00Z"
-}
-```
-
-#### 3. Product Catalog DTOs (`Products`)
-- **Каталожний продукт (`ProductResponse`):**
-```json
-{
-  "id": "0192e2b3-5730-7432-8411-cf0b91d20003",
-  "name": "Вівсяні пластівці цільнозернові",
-  "barcode": "4820001234567",
-  "brand": "Ясне Сонечко",
-  "caloriesPer100g": 365.0,
-  "proteinPer100g": 12.5,
-  "fatPer100g": 6.8,
-  "carbsPer100g": 62.0,
-  "createdAt": "2026-10-20T09:30:00Z",
-  "updatedAt": "2026-10-20T09:30:00Z"
-}
-```
-
-#### 4. Inventory Batch DTOs (`InventoryBatches` / `inventory_items`)
-- **Створення партії на складі (`POST /api/v1/households/{id}/inventory`):**
-```json
-{
-  "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
-  "location": "Pantry",
-  "quantity": 800.0,
-  "unit": "g",
-  "expiresAt": "2027-04-15T00:00:00Z",
-  "openedAt": null
-}
-```
-- **Складська партія у відповіді API (`InventoryItemResponse`):**
-```json
-{
-  "id": "0192e2b3-5730-7432-8411-cf0b91d20004",
-  "householdId": "0192e2b3-5730-7432-8411-cf0b91d20001",
-  "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
-  "productName": "Вівсяні пластівці цільнозернові",
-  "brand": "Ясне Сонечко",
-  "barcode": "4820001234567",
-  "location": "Pantry",
-  "quantity": 800.0,
-  "unit": "g",
-  "expiresAt": "2027-04-15T00:00:00Z",
-  "openedAt": null,
-  "daysUntilExpiration": 157,
-  "freshnessStatus": "Fresh",
-  "rowVersion": "10842",
-  "eTag": "W/"10842"",
-  "createdAt": "2026-11-09T10:00:00Z"
-}
-```
-
-#### 5. Recipe & Ingredients DTOs (`Recipes`, `RecipeIngredients`)
-- **Рецепт з інгредієнтами (`RecipeResponse`):**
-```json
-{
-  "id": "0192e2b3-5730-7432-8411-cf0b91d20005",
-  "householdId": null,
-  "title": "Вівсяна каша з ягодами та мигдалем",
-  "description": "Поживний збалансований сніданок з високим вмістом клітковини",
-  "instructions": "1. Залити пластівці водою/молоком у співвідношенні 1:2.\n2. Варити 5 хвилин.\n3. Додати ягоди та горіхи.",
-  "totalCalories": 420.0,
-  "totalProtein": 14.5,
-  "totalFat": 11.2,
-  "totalCarbs": 64.0,
-  "prepTimeMinutes": 10,
-  "isHouseholdCustom": false,
-  "ingredients": [
-    {
-      "id": "0192e2b3-5730-7432-8411-cf0b91d20006",
-      "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
-      "productName": "Вівсяні пластівці цільнозернові",
-      "quantity": 80.0,
-      "unit": "g",
-      "isOptional": false,
-      "stockAvailable": 800.0,
-      "isSufficientStock": true
-    }
-  ]
-}
-```
-
-#### 6. Meal Log & Macro Consumption DTOs (`MealLogs`, `MealLogItems`)
-- **Логування прийому їжі (`POST /api/v1/meals/log`):**
-```json
-{
-  "mealType": "Breakfast",
-  "loggedAt": "2026-11-09T08:30:00Z",
-  "items": [
-    {
-      "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
-      "quantity": 80.0,
-      "unit": "g"
-    }
-  ]
-}
-```
-- **Відповідь зі зведеними макросами прийому (`MealLogResponse`):**
-```json
-{
-  "id": "0192e2b3-5730-7432-8411-cf0b91d20007",
-  "userId": "0192e2b3-5730-7432-8411-cf0b91d20002",
-  "mealType": "Breakfast",
-  "loggedAt": "2026-11-09T08:30:00Z",
-  "calories": 292.0,
-  "protein": 10.0,
-  "fat": 5.4,
-  "carbs": 49.6,
-  "items": [
-    {
-      "id": "0192e2b3-5730-7432-8411-cf0b91d20008",
-      "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
-      "productName": "Вівсяні пластівці цільнозернові",
-      "quantity": 80.0,
-      "unit": "g",
-      "calories": 292.0,
-      "protein": 10.0,
-      "fat": 5.4,
-      "carbs": 49.6
-    }
-  ]
-}
-```
-
-#### 7. Shopping List Item DTOs (`ShoppingListItems`)
-- **Елемент списку покупок (`ShoppingListItemResponse`):**
-```json
-{
-  "id": "0192e2b3-5730-7432-8411-cf0b91d20009",
-  "householdId": "0192e2b3-5730-7432-8411-cf0b91d20001",
-  "productName": "Молоко безлактозне 2.5%",
-  "quantity": 1000.0,
-  "unit": "ml",
-  "isPurchased": false,
-  "addedByUserId": "0192e2b3-5730-7432-8411-cf0b91d20002",
-  "productId": null,
-  "version": 4,
-  "updatedAt": "2026-11-09T11:15:00Z"
-}
-```
-
-#### 8. Outbox Message & Idempotency Payloads
-- **Подія Transactional Outbox (`outbox_messages.payload`):**
-```json
-{
-  "eventId": "0192e2b3-5730-7432-8411-cf0b91d20010",
-  "eventType": "InventoryBatchConsumed",
-  "occurredAt": "2026-11-09T12:00:00Z",
-  "householdId": "0192e2b3-5730-7432-8411-cf0b91d20001",
-  "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
-  "consumedQuantity": 200.0,
-  "remainingQuantity": 600.0,
-  "reason": "CookRecipe"
-}
-```
-- **Запис ідемпотентності (`idempotency_records`):**
-```json
-{
-  "idempotencyKey": "9f8c67c2-b34f-4e09-913a-675cf942de81",
-  "userId": "0192e2b3-5730-7432-8411-cf0b91d20002",
-  "requestPath": "/api/v1/meals/log",
-  "statusCode": 201,
-  "responseBody": {
-    "mealLogId": "0192e2b3-5730-7432-8411-cf0b91d20007",
-    "totalCalories": 292.0
-  },
-  "createdAt": "2026-11-09T08:30:00Z",
-  "expiresAt": "2026-11-10T08:30:00Z"
-}
-```
-
----
-
 ## 4. Глибокий аналіз механізму конкурентності PostgreSQL `xmin`
 
 ### 4.1 Внутрішній устрій `xmin` у PostgreSQL
-У системі управління базами даних PostgreSQL кожен рядок таблиці (кортеж або *tuple*) зберігає на диску приховані системні заголовки. Одним із найважливіших серед них є стовпець **`xmin`** (`xid` — 32-бітний цілочисельний ідентифікатор транзакції).
+У реляційному ядрі PostgreSQL кожен рядок таблиці (кортеж або *tuple*) зберігає на диску системні заголовки. Одним із найважливіших є поле **`xmin`** (`xid` — 32-бітний цілочисельний Transaction ID).
 
-Коли транзакція створює новий рядок або оновлює існуючий рядок (`UPDATE`), PostgreSQL у рамках механізму MVCC (*Multi-Version Concurrency Control*):
-1. Не змінює старі байти на місці, а створює нову фізичну версію рядка.
-2. Записує у поле `xmin` нової версії ідентифікатор поточної транзакції (`TransactionXmin`).
-3. Позначає поле `xmax` старого рядка ідентифікатором цієї транзакції як завершене.
-
-Таким чином, **значення `xmin` гарантовано змінюється щоразу, коли рядок піддається будь-якій модифікації**. Це робить `xmin` ідеальним, нульово-затратним (*zero-overhead*) токеном версії рядка, оскільки:
-- Не потрібно додавати окремий стовпець `version INT` або `concurrency_token UUID`.
-- Не потрібно створювати ручні тригери чи піклуватися про збільшення лічильника в коді програми.
+При оновленні рядка (`UPDATE`):
+1. Механізм MVCC створює новий фізичний рядок із новим `xmin`, що дорівнює ідентифікатору поточної транзакції.
+2. Старий рядок позначається як застарілий (`xmax = TransactionId`).
+3. Значення `xmin` **гарантовано змінюється при кожній зміні даних рядка**, що робить його вбудованим, нульово-затратним (*zero-overhead*) токеном оптимістичного блокування без необхідності тригерів або штучних лічильників версій `version INT`.
 
 ### 4.2 Маппінг `xmin` в Entity Framework Core 10
-В ORM Entity Framework Core 10 для PostgreSQL (`Npgsql.EntityFrameworkCore.PostgreSQL`) системний стовпець `xmin` підтримується нативно на рівні конфігурації моделі за допомогою методу `.UseXminAsConcurrencyToken()` або `.IsRowVersion()`:
+В ORM Entity Framework Core 10 (`Npgsql.EntityFrameworkCore.PostgreSQL`) системне поле `xmin` реєструється декларативно:
 
 ```csharp
-public class InventoryItemConfiguration : IEntityTypeConfiguration<InventoryItem>
+public class InventoryBatchConfiguration : IEntityTypeConfiguration<InventoryBatch>
 {
-    public void Configure(EntityTypeBuilder<InventoryItem> builder)
+    public void Configure(EntityTypeBuilder<InventoryBatch> builder)
     {
-        builder.ToTable("inventory_items");
-
+        builder.ToTable("inventory_batches");
         builder.HasKey(e => e.Id);
 
         builder.Property(e => e.Quantity)
@@ -707,289 +493,40 @@ public class InventoryItemConfiguration : IEntityTypeConfiguration<InventoryItem
 }
 ```
 
-При такому налаштуванні EF Core під час виконання команди `SaveChangesAsync()` автоматично додає значення `xmin` у клаузулу `WHERE` згенерованого SQL-запиту:
-
+При збереженні змін `SaveChangesAsync()` EF Core формує умовний SQL-запит:
 ```sql
-UPDATE inventory_items 
+UPDATE inventory_batches 
 SET quantity = @p0, updated_at = @p1
-WHERE id = @p2 AND xmin = @p3;
+WHERE id = @p2 AND xmin = @expected_xmin;
 ```
-
-### 4.3 Наскрізний потік ETag $\rightarrow$ If-Match $\rightarrow$ HTTP 409 Conflict
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Alice as Анна (Клієнт A)
-    actor Bob as Олег (Клієнт B)
-    participant API as .NET 10 Web API
-    participant DB as PostgreSQL (inventory_items)
-
-    Note over Alice,DB: Початковий стан: Морозилка -> Лосось 500г (xmin = 10423)
-    
-    Alice->>API: GET /api/v1/inventory/items/{salmon_id}
-    API->>DB: SELECT *, xmin FROM inventory_items WHERE id = ...
-    DB-->>API: Row Data, xmin = 10423
-    API-->>Alice: HTTP 200 OK + ETag: W/"10423"<br/>{ "quantity": 500, "unit": "g" }
-
-    Bob->>API: GET /api/v1/inventory/items/{salmon_id}
-    DB-->>API: Row Data, xmin = 10423
-    API-->>Bob: HTTP 200 OK + ETag: W/"10423"<br/>{ "quantity": 500, "unit": "g" }
-
-    Note over Alice: Анна списує 200г для ланчу
-    Alice->>API: PATCH /api/v1/inventory/items/{salmon_id}<br/>If-Match: W/"10423"<br/>{ "consumedQuantity": 200 }
-    API->>DB: UPDATE inventory_items SET quantity = 300<br/>WHERE id = ... AND xmin = 10423
-    DB-->>API: 1 Row Affected (New xmin = 10424)
-    API-->>Alice: HTTP 200 OK + ETag: W/"10424"<br/>{ "quantity": 300, "unit": "g" }
-
-    Note over Bob: Олег намагається списати 400г
-    Bob->>API: PATCH /api/v1/inventory/items/{salmon_id}<br/>If-Match: W/"10423"<br/>{ "consumedQuantity": 400 }
-    API->>DB: UPDATE inventory_items SET quantity = 100<br/>WHERE id = ... AND xmin = 10423
-    DB-->>API: 0 Rows Affected! (Поточний xmin = 10424 != 10423)
-    
-    Note over API: EF Core кидає DbUpdateConcurrencyException
-    API-->>Bob: HTTP 409 Conflict (RFC 9457 Problem Details)<br/>errorCode: "CONCURRENT_MODIFICATION"<br/>currentQuantity: 300, currentETag: W/"10424"
-    
-    Note over Bob: UI відкриває <ConflictResolutionModal>
-```
-
-1. **Генерація ETag:** При запиті `GET /api/v1/inventory/items/{id}` бекенд формує заголовок відповіді:
-   ```http
-   ETag: W/"10423"
-   ```
-2. **Умовний запит:** Коли клієнт оновлює кількість партії або списує товар, він обов'язково повертає збережений токен:
-   ```http
-   PATCH /api/v1/inventory/items/0192e2b3-5730-7432-8411-cf0b91d23456
-   If-Match: W/"10423"
-   ```
-3. **Обробка колізії:** Якщо інший член сім'ї встиг оновити цей рядок раніше, `xmin` змінився (наприклад, став `10424`). Запит `UPDATE` зачіпає $0$ рядків. EF Core генерує виняток `DbUpdateConcurrencyException`, який глобальний перехоплювач `ProblemDetailsExceptionHandler` транслює у відповідь:
-   ```json
-   {
-     "type": "https://ediens.app/errors/concurrent-modification",
-     "title": "Conflict during state modification",
-     "status": 409,
-     "detail": "Партія продукту була модифікована іншим членом домогосподарства.",
-     "instance": "/api/v1/inventory/items/0192e2b3-5730-7432-8411-cf0b91d23456",
-     "errorCode": "CONCURRENT_MODIFICATION",
-     "extensions": {
-       "currentETag": "W/\"10424\"",
-       "currentQuantity": 300,
-       "unit": "g"
-     }
-   }
-   ```
-4. **Клієнтська реакція:** Фронтенд не ламається і не втрачає дані, а відкриває модальне вікно вирішення колізії `<ConflictResolutionModal>`, де показує фактичний залишок ($300\text{ г}$) і пропонує користувачеві підтвердити списання з нового залишку або скасувати операцію.
+Якщо інший користувач модифікував партію, оновлюється $0$ рядків, EF Core викидає `DbUpdateConcurrencyException`, а middleware повертає `409 Conflict` (RFC 9457).
 
 ---
 
-## 5. Специфікація Transactional Outbox (`outbox_messages`)
+## 5. Матриця збереження даних та політики очищення (Data Retention Policy & Classification Matrix)
 
-Для підтримки принципу кінцевої узгодженості (*Eventual Consistency*) та уникнення патерну розподілених двохфазних транзакцій (2PC) у системі реалізовано патерн **Transactional Outbox**.
+Нижче наведено вичерпну класифікацію всіх таблиць та потоків даних платформи **ēdiens** у повній відповідності до вимог безпеки, GDPR (EU 2016/679) та архітектурного сайзингу.
 
-### 5.1 Алгоритм транзакційного збереження
-Коли відбувається бізнес-подія (наприклад, додано партію товару, виконано 1-Click Cook або видалено прострочений продукт):
-1. Відкривається транзакція PostgreSQL: `BEGIN TRANSACTION;`.
-2. Виконуються мутації в таблицях `inventory_items` або `meal_logs`.
-3. У **тій же транзакції** виконується `INSERT INTO outbox_messages` з типом події та JSONB-корисним навантаженням:
-   ```sql
-   INSERT INTO outbox_messages (id, event_type, payload, status, created_at)
-   VALUES (
-       '0192e2b3-9999-7000-8000-abcdef012345',
-       'InventoryBatchCreated',
-       '{"householdId": "...", "productId": "...", "quantity": 500, "expiresAt": "2026-11-03T00:00:00Z"}'::jsonb,
-       'PENDING',
-       CURRENT_TIMESTAMP
-   );
-   ```
-4. Фіксація транзакції: `COMMIT;`. Подія гарантовано зберігається в базі тоді й лише тоді, коли збереглися самі дані.
-
-### 5.2 Фоновий споживач: `FOR UPDATE SKIP LOCKED`
-Фоновий системний процес (Background Outbox Worker) запускається за розкладом кожні 500 мс або реагує на внутрішній тригер і вичитує чергу повідомлень:
-
-```sql
-SELECT id, event_type, payload, retry_count
-FROM outbox_messages
-WHERE status = 'PENDING'
-ORDER BY created_at ASC
-LIMIT 20
-FOR UPDATE SKIP LOCKED;
-```
-
-#### Чому `SKIP LOCKED`?
-- **Горизонтальне масштабування:** Якщо розгорнуто 5 інстансів контейнера воркера, кожен із них одночасно блокує свій незалежний пакет із 20 рядків. Жоден інстанс не блокує інший і не очікує звільнення блокування.
-- **Гарантія At-Least-Once Delivery:** Якщо воркер упаде посеред обробки пачки, транзакція відкочується автоматично, блокування звільняється, і сусідній воркер негайно підхоплює повідомлення.
-- Після успішної відправки статус оновлюється на `PROCESSED`, а поле `processed_at` отримує поточну позначку часу. При виникненні помилки лічильник `retry_count` збільшується. Якщо `retry_count >= 5`, статус переходить у `FAILED` (Dead Letter).
+| Категорія даних (Data Category) | Таблиця / Потік даних | Рівень чутливості (Sensitivity Level) | Гарячий рівень (Hot Storage Tier: PostgreSQL / Redis TTL) | Теплий / Холодний архівний рівень (Warm / Cold Archival Tier) | Механізм видалення та очищення (Purge & Hard-Delete Mechanism) | GDPR нормативне обґрунтування |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **PII & Auth** | `users`, `household_members` | **Restricted PII** | Поки акаунт активний у PostgreSQL. Сесії в Redis: TTL 15 хв (Access) / 30 днів (Refresh). | Щоденні стиснуті бекапи `pg_dump -Z9` (локальне збереження: **30 діб**). | Каскадне фізичне видалення (`ON DELETE CASCADE`) при виклику `DELETE /api/v1/users/me`. | Art. 17 GDPR (Право на забуття / Right-to-Erasure). |
+| **Operational Inventory State** | `inventory_batches` (Активні залишки) | **Confidential Household Data** | Необмежено, поки `quantity > 0` у PostgreSQL. Кеш залишків у Redis: TTL 10 хв. | Щоденний знімок `pg_dump` (30 діб retention). | Перехід у стан `quantity = 0` після списання. | Art. 6.1b GDPR (Виконання контракту / надання послуги). |
+| **Operational Inventory State** | `inventory_batches` (Списані/Нульові партії) | **Confidential Household Data** | **30 днів** у гарячій базі після досягнення `quantity = 0`. | Warm Tier: 12 місяців у реляційній базі. Cold Tier: анонімізовані Parquet-архіви у S3 (3 роки). | Автоматичний нічний фоновий демон: `DELETE WHERE quantity = 0 AND updated_at < NOW() - INTERVAL '30 days'`. | Принцип мінімізації даних (Art. 5.1c GDPR). |
+| **Nutritional & Meal History** | `meal_logs`, `meal_log_items`, `nutrition_targets` | **Restricted PII (Health Data)** | **90 днів** у активній PostgreSQL (Hot Tier). | Щомісячні агрегати КБЖВ у `daily_macro_summary` (**5 років**). Повна анонімізація (`user_id = 00000000-...`). | Декларативне секціонування PostgreSQL: `DROP PARTITION` щомісяця для сирих даних старше 12 місяців. | Спеціальна категорія даних (Art. 9 GDPR). Явна згода. |
+| **Transactional Outbox / Idempotency** | `outbox_messages` | **Internal Ephemeral Telemetry** | До моменту обробки (`PENDING`). Після обробки: **7 днів** (`PROCESSED`). | Не архівується у теплі/холодні сховища. Тільки у складі аварійних snapshot бекапів. | Щоденний cron: `DELETE FROM outbox_messages WHERE status = 'PROCESSED' AND processed_at < NOW() - INTERVAL '7 days'`. | Забезпечення стійкості розподіленої системи. |
+| **Transactional Outbox / Idempotency** | `idempotency_records` | **Internal Ephemeral Telemetry** | **24 години** у Redis (`PX 86400000`) та PostgreSQL. | Не архівується (транзитний стан транзакцій). | Щоденний cron: `DELETE FROM idempotency_records WHERE expires_at < CURRENT_TIMESTAMP`. | Захист від повторних списань та атак повторення. |
+| **Operational Inventory State** | `shopping_list_items` | **Confidential Household Data** | Некуплені: необмежено. Куплені: **7 днів** гарячого зберігання в PostgreSQL. | Warm: 30 днів після покупки для звірки чеків. | Щоденний cron: `DELETE FROM shopping_list_items WHERE is_purchased = true AND updated_at < NOW() - INTERVAL '30 days'`. | Мінімізація даних домогосподарств. |
+| **Public Catalog Data** | `products`, `recipes` (Global) | **Public Catalog Data** | Постійно (безстроково) у PostgreSQL та Redis HybridCache (TTL 24 години). | Входить до загального дампа `pg_dump` бази даних. | Видалення не застосовується (публічний нормативно-довідковий довідник). | Відкриті знання, нейтральні неперсональні дані. |
+| **Audit & Security Logs** | `audit_logs` | **Confidential Household Data** | **90 днів** у гарячій PostgreSQL. | Cold: стиснутий шифрований архів у S3/WORM сховищі (12 місяців). | Автоматична партиційна ротація: `DROP PARTITION audit_logs_older_than_1yr`. Таблиця захищена від `UPDATE` і ручного `DELETE`. | ISO/IEC 27001, обов'язковий аудит безпеки доступу. |
+| **Prometheus TSDB Metrics** | `http_*`, `ediens_*`, `npgsql_*` часові ряди | **Internal Ephemeral Telemetry** | **30 днів** у локальному томі Prometheus TSDB (`/prometheus`, RAM + Block Storage). | Агреговані довгострокові метрики в Thanos / Cortex (12 місяців). | Автоматичне витіснення за параметром запуску Prometheus: `--storage.tsdb.retention.time=30d`. | Моніторинг доступності та SLA (NFR-01, NFR-05). |
 
 ---
 
-## 6. Специфікація сховища ідемпотентності (`idempotency_records`)
+## 6. Регламент обробки права на забуття (GDPR Right-to-Erasure Runbook)
 
-Для операцій, де мережеві збої можуть призвести до подвійного списання запасів або дублювання запису в щоденнику харчування (`POST /api/v1/meals/log`, `POST /api/v1/recipes/{id}/cook`), система використовує комбінований дворівневий механізм ідемпотентності.
-
-### 6.1 Життєвий цикл запиту з Idempotency-Key
-1. **Перевірка наявності:** Клієнт генерує заголовок `Idempotency-Key: <UUIDv7>`. При отриманні запиту middleware перевіряє таблицю `idempotency_records` за первинним ключем.
-2. **Запит вже оброблено:** Якщо знайдено запис зі збереженим `status_code` та `response_body`, сервер негайно повертає закешовану відповідь клієнту без виконання бізнес-логіки.
-3. **Запит у процесі виконання (In-Flight):** У Redis накладається короткоживучий лок (`SET lock:idempotency:{key} {token} NX PX 10000`). Якщо інший запит із тим самим ключем надходить у той самий момент, він отримує HTTP `409 Conflict` або чекає на звільнення локу.
-4. **Збереження результату:** Після успішної транзакції відповідь зберігається в `idempotency_records` із терміном придатності запису (TTL) 24 години (`expires_at = CURRENT_TIMESTAMP + INTERVAL '24 hours'`).
-5. **Фонове очищення:** Застарілі записи видаляються щоночі фоновою задачею:
-   ```sql
-   DELETE FROM idempotency_records WHERE expires_at < CURRENT_TIMESTAMP;
-   ```
-
----
-
-## 7. Стратегія індексації та оптимізації запитів
-
-Для гарантування часу відгуку API $p95 < 150\text{ ms}$ (NFR-01) спроектовано такі спеціалізовані індекси:
-
-| Назва індексу | Таблиця | Стовпці / Умова | Призначення та бізнес-ефект |
-| :--- | :--- | :--- | :--- |
-| `idx_inventory_fefo` | `inventory_items` | `(household_id, expires_at ASC) WHERE quantity > 0` | **Головний FEFO-індекс:** Забезпечує миттєву вибірку та сортування партій без сканування всієї таблиці та без урахування списаних залишків (`quantity = 0`). |
-| `idx_outbox_pending` | `outbox_messages` | `(created_at ASC) WHERE status = 'PENDING'` | **Outbox Queue Індекс:** Забезпечує надшвидке виконання вибірки `SKIP LOCKED` для фонового демона. |
-| `idx_products_barcode`| `products` | `(barcode) WHERE barcode IS NOT NULL` | **EAN-13 Індекс:** Унікальний пошук за штрих-кодом з ігноруванням вагових товарів без штрих-коду. |
-| `idx_meal_logs_user_date`| `meal_logs` | `(user_id, logged_at DESC)` | **Індекс дашборду макросів:** Дозволяє вибирати прийоми їжі за поточну добу для розрахунку залишку бюджету за $O(\log N)$. |
-| `idx_shopping_list_household`| `shopping_list_items` | `(household_id, is_purchased)` | **Індекс списку покупок:** Прискорює фільтрацію некуплених позицій для мобільного клієнта. |
-
-
----
-
-## 8. Матриця політики збереження даних (Data Retention Policy Classification Matrix)
-
-Для забезпечення відповідності європейському регламенту захисту персональних даних (**GDPR - General Data Protection Regulation, EU 2016/679**), мінімізації розміру сховища на диску, оптимізації вартості хмарної інфраструктури та підтримки високої продуктивності B-Tree індексів у PostgreSQL, система **ēdiens** впроваджує 4-рівневу архітектуру збереження та ротації даних.
-
-### 8.1 Таксономія рівнів збереження (Storage Tier Taxonomy)
-
-```mermaid
-flowchart LR
-    Hot["HOT TIER<br/>(NVMe SSD / Redis)<br/>• p95 < 20ms<br/>• Оперативні мутації"] -->|Ротація / TTL| Warm["WARM TIER<br/>(Standard SSD / Partition)<br/>• p95 < 100ms<br/>• Аналітика поточного року"]
-    Warm -->|Анонімізація / Експорт| Cold["COLD TIER<br/>(S3 / MinIO / Parquet)<br/>• p95 < 2s<br/>• Дослідницькі агрегати"]
-    Hot -->|TTL Expiry| Purge["PURGE TIER<br/>(Cryptographic Zeroing)<br/>• Назавжди видалено<br/>• GDPR Art. 17"]
-    Warm -->|Retention Expired| Purge
-```
-
-1. **Hot Tier (Гаряче оперативне сховище):**
-   - **Носій:** PostgreSQL 17 на локальних високошвидкісних NVMe SSD з WAL + Redis In-Memory.
-   - **Затримка (SLA):** Читання $p95 < 20	ext{ ms}$, запис $p95 < 50	ext{ ms}$.
-   - **Призначення:** Активні запаси холодильника (`inventory_items WHERE quantity > 0`), актуальний список покупок, сесії та токени ідемпотентності, щоденник харчування за останні 90 днів.
-2. **Warm Tier (Тепле оперативне сховище):**
-   - **Носій:** Секціоновані таблиці PostgreSQL на стандартних SSD.
-   - **Затримка (SLA):** Читання $p95 < 100	ext{ ms}$.
-   - **Призначення:** Історія споживання їжі за останні 365 днів, списані партії інвентарю для аналітики харчових відходів (Zero-Waste Analytics), оброблені події Transactional Outbox.
-3. **Cold Tier (Холодний стиснений архів):**
-   - **Носій:** Об'єктне сховище AWS S3 Glacier / MinIO / Cloudflare R2 у колоночному форматі **Apache Parquet** зі стисненням `zstd`.
-   - **Затримка (SLA):** Доступ за секунди/хвилини через аналітичні рушії (DuckDB, Trino або ClickHouse).
-   - **Призначення:** Анонімізовані статистичні вибірки динаміки споживання макронутрієнтів та утилізації продуктів за 3+ роки для тренування рекомендаційних моделей.
-4. **Purge Tier (Незворотне фізичне знищення):**
-   - **Метод:** Пряма SQL-команда `DELETE` або миттєве скидання партицій `DROP TABLE / TRUNCATE PARTITION`, що очищає блоки на рівні файлової системи без збереження залишкових слідів у WAL.
-
----
-
-### 8.2 Матриця класифікації та політик збереження даних
-
-У наведеній нижче матриці регламентовано життєвий цикл кожного типу інформації в системі:
-
-| Сутність / Таблиця | Класифікація даних | Рівень сховища | Гарячий TTL | Теплий TTL | Холодний TTL | Стратегія очищення / Ротації | GDPR обґрунтування |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`users`** | PII (Email, Пароль, Налаштування) | Hot | Необмежено (поки акаунт активний) | 30 днів після запиту на видалення (Grace Period) | — | Hard Delete каскадно через зовнішні ключі | Art. 17 (Right to be Forgotten) |
-| **`households`** | Організаційні дані | Hot | Необмежено (поки є $\ge 1$ учасник) | 14 днів після виходу останнього учасника | — | Фоновий демон видаляє пусті домогосподарства | Мінімізація даних (Art. 5.1c) |
-| **`products`** | Відкритий каталог (Нейтральні) | Hot | Постійно | — | — | Дані публічного каталогу безстрокові | Загальний інтерес / Відкриті знання |
-| **`inventory_items`** (Активні) | Оперативні запаси | Hot | До моменту повного списання (`quantity = 0`) | — | — | Перехід у стан списаного залишку | Виконання контракту (Art. 6.1b) |
-| **`inventory_items`** (Списані/Витрачені) | Історія утилізації та списань | Warm | — | 12 місяців | 3 роки (Parquet, анонімізовано) | Щомісячне партиційне архівація у S3, видалення з PG | Легітимний інтерес (Zero-Waste звітність) |
-| **`meal_logs`** & **`items`** | Особисті дані про здоров'я (Health PII) | Hot / Warm | 90 днів (Hot) | 12 місяців (Warm) | 3 роки (Cold, повна деперсоналізація) | Щомісячна ротація партицій `logged_at` | Явна згода (Art. 9 GDPR) |
-| **`nutrition_targets`** | Профіль цілей | Hot | Необмежено (поки діє ціль) | 2 роки (історія змін цілей) | — | Видалення старих ревізій через 24 міс. | Згода користувача |
-| **`recipes`** (Global) | Кулінарний каталог | Hot | Постійно | — | — | Не видаляється | Відкритий каталог |
-| **`recipes`** (Household) | Користувацький контент | Hot | До видалення автором | — | — | Каскадне видалення разом із домогосподарством | Власність користувача |
-| **`shopping_list_items`** (Некуплені) | Оперативні списки | Hot | Необмежено | — | — | Зберігається до здійснення покупки | Виконання завдання користувача |
-| **`shopping_list_items`** (Куплені) | Виконані покупки | Hot | 7 днів після покупки | 30 днів | — | Щоденний cron видаляє куплені елементи старіші 30 днів | Мінімізація даних |
-| **`outbox_messages`** | Системні події (Асинхронний транспорт) | Hot | До обробки (`PENDING`) | 7 днів (`PROCESSED`) | — | Щоденний cron очищає успішно оброблені події; помилкові зберігаються 30 днів | Системна надійність |
-| **`idempotency_records`** | Транзитні HTTP-токени | Hot | **24 години** (строгий TTL) | — | — | Щоденний cron: `DELETE WHERE expires_at < NOW()` | Запобігання повторним транзакціям |
-
----
-
-### 8.3 Відповідність вимогам GDPR та політика приватності
-
-#### 1. Право на забуття (Right to be Forgotten - Стаття 17 GDPR)
-Коли користувач ініціює видалення свого профілю через ендпоінт `DELETE /api/v1/users/me`:
-1. **Каскадне знищення персональних зв'язків:** Завдяки конфігурації `ON DELETE CASCADE` у таблицях `users`, `household_members`, `nutrition_targets`, `idempotency_records`, всі персональні дані фізично видаляються з PostgreSQL.
-2. **Обробка спільних домогосподарств:** Якщо користувач був `Owner` у домогосподарстві:
-   - Якщо в домогосподарстві є інші учасники, право власності автоматично передається найстарішому учаснику за датою `joined_at`.
-   - Якщо інших учасників немає, домогосподарство та пов'язані з ним `inventory_items` та `shopping_list_items` каскадно видаляються.
-3. **Псевдонімізація та анонімізація для аналітики:**
-   Якщо системі потрібні історичні агреговані показники для національної статистики нутриціології, записи `meal_logs` від'єднуються від фізичної особи: поле `user_id` встановлюється в `00000000-0000-0000-0000-000000000000` (Cryptographic Blackhole), а будь-які персональні текстові примітки видаляються.
-
-#### 2. Право на перенесення даних (Data Portability - Стаття 20 GDPR)
-Користувач має право у будь-який момент завантажити повний архів своїх даних через виклик `GET /api/v1/users/me/export`. Система асинхронно формує ZIP-архів із вмістом:
-- `profile.json`: Метадані профілю та поточні налаштування.
-- `targets.json`: Історія цілей КБЖВ.
-- `meals_history.csv`: Деталізований щоденник усіх прийомів їжі з макросами та інгредієнтами.
-- `inventory_snapshot.csv`: Поточні запаси закріпленого домогосподарства.
-
----
-
-### 8.4 Автоматизовані завдання очищення та Cron-архівація
-
-Для виконання політик ротації даних без ручного втручання налаштовано регулярні фонові задачі, що запускаються через механізм **Kubernetes CronJob** або вбудований планувальник **.NET BackgroundService** з лідерським блокуванням:
-
-```mermaid
-flowchart TD
-    Scheduler["Cron Scheduler<br/>(Every Night 02:00 UTC)"] --> Task1["Clean Idempotency<br/>DELETE WHERE expires_at < NOW()"]
-    Scheduler --> Task2["Purge Outbox<br/>DELETE WHERE status = 'PROCESSED'<br/>AND created_at < NOW() - 7 days"]
-    Scheduler --> Task3["Clean Purchased Items<br/>DELETE WHERE is_purchased = true<br/>AND updated_at < NOW() - 30 days"]
-    Scheduler --> Task4["Partition Maintenance<br/>Attach next month partition<br/>Archive & detach old partitions"]
-```
-
-#### SQL-скрипти щоденного обслуговування:
-```sql
--- 1. Очищення застарілих ключів ідемпотентності
-DELETE FROM idempotency_records 
-WHERE expires_at < CURRENT_TIMESTAMP;
-
--- 2. Очищення оброблених повідомлень Transactional Outbox старіших за 7 діб
-DELETE FROM outbox_messages 
-WHERE status = 'PROCESSED' 
-  AND created_at < (CURRENT_TIMESTAMP - INTERVAL '7 days');
-
--- 3. Очищення застарілих куплених пунктів списку покупок
-DELETE FROM shopping_list_items 
-WHERE is_purchased = TRUE 
-  AND updated_at < (CURRENT_TIMESTAMP - INTERVAL '30 days');
-```
-
----
-
-### 8.5 Архітектура декларативного партиціонування PostgreSQL для `meal_logs`
-
-Оскільки щоденник споживання їжі є найбільш динамічною та швидкозростаючою таблицею ($> 1	ext{ млн}$ записів на рік при 1000 активних користувачів), таблиця `meal_logs` оптимізована під **Range Partitioning за датою `logged_at`**:
-
-```sql
--- Створення головної партиційованої таблиці
-CREATE TABLE meal_logs_partitioned (
-    id UUID NOT NULL,
-    user_id UUID NOT NULL,
-    logged_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    meal_type VARCHAR(20) NOT NULL,
-    calories NUMERIC(7, 2) NOT NULL DEFAULT 0,
-    protein NUMERIC(6, 2) NOT NULL DEFAULT 0,
-    fat NUMERIC(6, 2) NOT NULL DEFAULT 0,
-    carbs NUMERIC(6, 2) NOT NULL DEFAULT 0,
-    idempotency_key UUID NULL,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id, logged_at)
-) PARTITION BY RANGE (logged_at);
-
--- Створення місячних партицій для 2026-2027 років
-CREATE TABLE meal_logs_y2026m11 PARTITION OF meal_logs_partitioned
-    FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00');
-
-CREATE TABLE meal_logs_y2026m12 PARTITION OF meal_logs_partitioned
-    FOR VALUES FROM ('2026-12-01 00:00:00+00') TO ('2027-01-01 00:00:00+00');
-
--- Швидке від'єднання застарілої партиції без блокування читання
--- ALTER TABLE meal_logs_partitioned DETACH PARTITION meal_logs_y2025m11 CONCURRENTLY;
--- COPY meal_logs_y2025m11 TO PROGRAM 'gzip > /archive/meals_2025_11.csv.gz' WITH CSV HEADER;
--- DROP TABLE meal_logs_y2025m11;
-```
-
-**Переваги підходу:**
-1. **Partition Pruning:** Запити користувача за поточний місяць сканують виключно індекс поточної партиції, зменшуючи використання пам'яті RAM buffer pool на $85\%$.
-2. **Миттєве очищення (Zero-IO Deletion):** Видалення партиції за $N$ місяців назад виконується командою `DROP TABLE`, що займає $\sim 5	ext{ ms}$ незалежно від кількості рядків і не викликає роздування (bloat) бази та вакуумізації `VACUUM`.
+При надходженні запиту `DELETE /api/v1/users/me`:
+1. **Атомарний каскадний `DELETE`:** Транзакція видаляє запис користувача з таблиці `users`. Через зовнішні ключі `ON DELETE CASCADE` автоматично видаляються всі записи в `household_members`, `nutrition_targets`, `idempotency_records`.
+2. **Перепризначення або видалення домогосподарства:**
+   - Якщо користувач був єдиним членом або `Owner` домогосподарства, де немає інших членів $\rightarrow$ домогосподарство та пов'язані з ним `inventory_batches` і `shopping_list_items` видаляються.
+   - Якщо в домогосподарстві залишилися інші учасники $\rightarrow$ роль `Owner` передається найстарішому за датою `joined_at` учаснику, а зв'язок видаленого користувача розривається.
+3. **Знеособлення щоденника харчування (Anonymization Blackhole):** Записи в `meal_logs` або повністю видаляються, або (за вибором користувача для збереження загальнонаціональної статистики) від'єднуються від фізичної особи шляхом заміни `user_id` на нульовий UUID `00000000-0000-0000-0000-000000000000` з видаленням будь-яких коментарів і текстових полів.
