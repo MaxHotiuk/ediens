@@ -1,9 +1,9 @@
 {
   "id": "DOC-02",
   "title": "Security Threat Model (3 Flows + 12 Mitigations) & Cloud/Self-Hosted Infrastructure Diagram",
-  "status": "TODO",
-  "assigned_to": null,
-  "updated_at": "2026-11-09T13:49:56Z",
+  "status": "IN_PROGRESS",
+  "assigned_to": "Maxs-MacBook-Air",
+  "updated_at": "2026-11-09T14:01:26Z",
   "branch": "docs/DOC-02-security-and-deployment-models",
   "dependencies": [
     "FIX-07"
