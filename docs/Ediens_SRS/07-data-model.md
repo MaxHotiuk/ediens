@@ -445,6 +445,232 @@ COMMENT ON TABLE idempotency_records IS 'Реєстр виконаних іде�
 
 ---
 
+
+
+### 3.14 Канонічні JSON Payload Schemas та DTO-контракти сутностей
+
+Для забезпечення повної сумісності між API на .NET 10, веб-клієнтом React та сторонніми інтеграціями нижче наведено канонічні схеми запитів і відповідей у форматі JSON для всіх ключових сутностей системи.
+
+#### 1. Household DTOs (`Households`)
+- **Створення домогосподарства (`POST /api/v1/households`):**
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CreateHouseholdRequest",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 150,
+      "example": "Сім'я Коваленків"
+    }
+  }
+}
+```
+- **Відповідь з інформацією про домогосподарство (`HouseholdResponse`):**
+```json
+{
+  "id": "0192e2b3-5730-7432-8411-cf0b91d20001",
+  "name": "Сім'я Коваленків",
+  "inviteCode": "KOV-8821",
+  "memberCount": 3,
+  "currentUserRole": "Owner",
+  "createdAt": "2026-11-01T08:00:00Z",
+  "updatedAt": "2026-11-01T08:00:00Z"
+}
+```
+
+#### 2. User & Auth DTOs (`Users`)
+- **Профіль користувача (`UserResponse`):**
+```json
+{
+  "id": "0192e2b3-5730-7432-8411-cf0b91d20002",
+  "email": "maksym.kovalenko@example.com",
+  "households": [
+    {
+      "householdId": "0192e2b3-5730-7432-8411-cf0b91d20001",
+      "name": "Сім'я Коваленків",
+      "role": "Owner"
+    }
+  ],
+  "createdAt": "2026-10-15T12:00:00Z"
+}
+```
+
+#### 3. Product Catalog DTOs (`Products`)
+- **Каталожний продукт (`ProductResponse`):**
+```json
+{
+  "id": "0192e2b3-5730-7432-8411-cf0b91d20003",
+  "name": "Вівсяні пластівці цільнозернові",
+  "barcode": "4820001234567",
+  "brand": "Ясне Сонечко",
+  "caloriesPer100g": 365.0,
+  "proteinPer100g": 12.5,
+  "fatPer100g": 6.8,
+  "carbsPer100g": 62.0,
+  "createdAt": "2026-10-20T09:30:00Z",
+  "updatedAt": "2026-10-20T09:30:00Z"
+}
+```
+
+#### 4. Inventory Batch DTOs (`InventoryBatches` / `inventory_items`)
+- **Створення партії на складі (`POST /api/v1/households/{id}/inventory`):**
+```json
+{
+  "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
+  "location": "Pantry",
+  "quantity": 800.0,
+  "unit": "g",
+  "expiresAt": "2027-04-15T00:00:00Z",
+  "openedAt": null
+}
+```
+- **Складська партія у відповіді API (`InventoryItemResponse`):**
+```json
+{
+  "id": "0192e2b3-5730-7432-8411-cf0b91d20004",
+  "householdId": "0192e2b3-5730-7432-8411-cf0b91d20001",
+  "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
+  "productName": "Вівсяні пластівці цільнозернові",
+  "brand": "Ясне Сонечко",
+  "barcode": "4820001234567",
+  "location": "Pantry",
+  "quantity": 800.0,
+  "unit": "g",
+  "expiresAt": "2027-04-15T00:00:00Z",
+  "openedAt": null,
+  "daysUntilExpiration": 157,
+  "freshnessStatus": "Fresh",
+  "rowVersion": "10842",
+  "eTag": "W/"10842"",
+  "createdAt": "2026-11-09T10:00:00Z"
+}
+```
+
+#### 5. Recipe & Ingredients DTOs (`Recipes`, `RecipeIngredients`)
+- **Рецепт з інгредієнтами (`RecipeResponse`):**
+```json
+{
+  "id": "0192e2b3-5730-7432-8411-cf0b91d20005",
+  "householdId": null,
+  "title": "Вівсяна каша з ягодами та мигдалем",
+  "description": "Поживний збалансований сніданок з високим вмістом клітковини",
+  "instructions": "1. Залити пластівці водою/молоком у співвідношенні 1:2.\n2. Варити 5 хвилин.\n3. Додати ягоди та горіхи.",
+  "totalCalories": 420.0,
+  "totalProtein": 14.5,
+  "totalFat": 11.2,
+  "totalCarbs": 64.0,
+  "prepTimeMinutes": 10,
+  "isHouseholdCustom": false,
+  "ingredients": [
+    {
+      "id": "0192e2b3-5730-7432-8411-cf0b91d20006",
+      "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
+      "productName": "Вівсяні пластівці цільнозернові",
+      "quantity": 80.0,
+      "unit": "g",
+      "isOptional": false,
+      "stockAvailable": 800.0,
+      "isSufficientStock": true
+    }
+  ]
+}
+```
+
+#### 6. Meal Log & Macro Consumption DTOs (`MealLogs`, `MealLogItems`)
+- **Логування прийому їжі (`POST /api/v1/meals/log`):**
+```json
+{
+  "mealType": "Breakfast",
+  "loggedAt": "2026-11-09T08:30:00Z",
+  "items": [
+    {
+      "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
+      "quantity": 80.0,
+      "unit": "g"
+    }
+  ]
+}
+```
+- **Відповідь зі зведеними макросами прийому (`MealLogResponse`):**
+```json
+{
+  "id": "0192e2b3-5730-7432-8411-cf0b91d20007",
+  "userId": "0192e2b3-5730-7432-8411-cf0b91d20002",
+  "mealType": "Breakfast",
+  "loggedAt": "2026-11-09T08:30:00Z",
+  "calories": 292.0,
+  "protein": 10.0,
+  "fat": 5.4,
+  "carbs": 49.6,
+  "items": [
+    {
+      "id": "0192e2b3-5730-7432-8411-cf0b91d20008",
+      "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
+      "productName": "Вівсяні пластівці цільнозернові",
+      "quantity": 80.0,
+      "unit": "g",
+      "calories": 292.0,
+      "protein": 10.0,
+      "fat": 5.4,
+      "carbs": 49.6
+    }
+  ]
+}
+```
+
+#### 7. Shopping List Item DTOs (`ShoppingListItems`)
+- **Елемент списку покупок (`ShoppingListItemResponse`):**
+```json
+{
+  "id": "0192e2b3-5730-7432-8411-cf0b91d20009",
+  "householdId": "0192e2b3-5730-7432-8411-cf0b91d20001",
+  "productName": "Молоко безлактозне 2.5%",
+  "quantity": 1000.0,
+  "unit": "ml",
+  "isPurchased": false,
+  "addedByUserId": "0192e2b3-5730-7432-8411-cf0b91d20002",
+  "productId": null,
+  "version": 4,
+  "updatedAt": "2026-11-09T11:15:00Z"
+}
+```
+
+#### 8. Outbox Message & Idempotency Payloads
+- **Подія Transactional Outbox (`outbox_messages.payload`):**
+```json
+{
+  "eventId": "0192e2b3-5730-7432-8411-cf0b91d20010",
+  "eventType": "InventoryBatchConsumed",
+  "occurredAt": "2026-11-09T12:00:00Z",
+  "householdId": "0192e2b3-5730-7432-8411-cf0b91d20001",
+  "productId": "0192e2b3-5730-7432-8411-cf0b91d20003",
+  "consumedQuantity": 200.0,
+  "remainingQuantity": 600.0,
+  "reason": "CookRecipe"
+}
+```
+- **Запис ідемпотентності (`idempotency_records`):**
+```json
+{
+  "idempotencyKey": "9f8c67c2-b34f-4e09-913a-675cf942de81",
+  "userId": "0192e2b3-5730-7432-8411-cf0b91d20002",
+  "requestPath": "/api/v1/meals/log",
+  "statusCode": 201,
+  "responseBody": {
+    "mealLogId": "0192e2b3-5730-7432-8411-cf0b91d20007",
+    "totalCalories": 292.0
+  },
+  "createdAt": "2026-11-09T08:30:00Z",
+  "expiresAt": "2026-11-10T08:30:00Z"
+}
+```
+
+---
+
 ## 4. Глибокий аналіз механізму конкурентності PostgreSQL `xmin`
 
 ### 4.1 Внутрішній устрій `xmin` у PostgreSQL
@@ -623,3 +849,147 @@ FOR UPDATE SKIP LOCKED;
 | `idx_products_barcode`| `products` | `(barcode) WHERE barcode IS NOT NULL` | **EAN-13 Індекс:** Унікальний пошук за штрих-кодом з ігноруванням вагових товарів без штрих-коду. |
 | `idx_meal_logs_user_date`| `meal_logs` | `(user_id, logged_at DESC)` | **Індекс дашборду макросів:** Дозволяє вибирати прийоми їжі за поточну добу для розрахунку залишку бюджету за $O(\log N)$. |
 | `idx_shopping_list_household`| `shopping_list_items` | `(household_id, is_purchased)` | **Індекс списку покупок:** Прискорює фільтрацію некуплених позицій для мобільного клієнта. |
+
+
+---
+
+## 8. Матриця політики збереження даних (Data Retention Policy Classification Matrix)
+
+Для забезпечення відповідності європейському регламенту захисту персональних даних (**GDPR - General Data Protection Regulation, EU 2016/679**), мінімізації розміру сховища на диску, оптимізації вартості хмарної інфраструктури та підтримки високої продуктивності B-Tree індексів у PostgreSQL, система **ēdiens** впроваджує 4-рівневу архітектуру збереження та ротації даних.
+
+### 8.1 Таксономія рівнів збереження (Storage Tier Taxonomy)
+
+```mermaid
+flowchart LR
+    Hot["HOT TIER<br/>(NVMe SSD / Redis)<br/>• p95 < 20ms<br/>• Оперативні мутації"] -->|Ротація / TTL| Warm["WARM TIER<br/>(Standard SSD / Partition)<br/>• p95 < 100ms<br/>• Аналітика поточного року"]
+    Warm -->|Анонімізація / Експорт| Cold["COLD TIER<br/>(S3 / MinIO / Parquet)<br/>• p95 < 2s<br/>• Дослідницькі агрегати"]
+    Hot -->|TTL Expiry| Purge["PURGE TIER<br/>(Cryptographic Zeroing)<br/>• Назавжди видалено<br/>• GDPR Art. 17"]
+    Warm -->|Retention Expired| Purge
+```
+
+1. **Hot Tier (Гаряче оперативне сховище):**
+   - **Носій:** PostgreSQL 17 на локальних високошвидкісних NVMe SSD з WAL + Redis In-Memory.
+   - **Затримка (SLA):** Читання $p95 < 20	ext{ ms}$, запис $p95 < 50	ext{ ms}$.
+   - **Призначення:** Активні запаси холодильника (`inventory_items WHERE quantity > 0`), актуальний список покупок, сесії та токени ідемпотентності, щоденник харчування за останні 90 днів.
+2. **Warm Tier (Тепле оперативне сховище):**
+   - **Носій:** Секціоновані таблиці PostgreSQL на стандартних SSD.
+   - **Затримка (SLA):** Читання $p95 < 100	ext{ ms}$.
+   - **Призначення:** Історія споживання їжі за останні 365 днів, списані партії інвентарю для аналітики харчових відходів (Zero-Waste Analytics), оброблені події Transactional Outbox.
+3. **Cold Tier (Холодний стиснений архів):**
+   - **Носій:** Об'єктне сховище AWS S3 Glacier / MinIO / Cloudflare R2 у колоночному форматі **Apache Parquet** зі стисненням `zstd`.
+   - **Затримка (SLA):** Доступ за секунди/хвилини через аналітичні рушії (DuckDB, Trino або ClickHouse).
+   - **Призначення:** Анонімізовані статистичні вибірки динаміки споживання макронутрієнтів та утилізації продуктів за 3+ роки для тренування рекомендаційних моделей.
+4. **Purge Tier (Незворотне фізичне знищення):**
+   - **Метод:** Пряма SQL-команда `DELETE` або миттєве скидання партицій `DROP TABLE / TRUNCATE PARTITION`, що очищає блоки на рівні файлової системи без збереження залишкових слідів у WAL.
+
+---
+
+### 8.2 Матриця класифікації та політик збереження даних
+
+У наведеній нижче матриці регламентовано життєвий цикл кожного типу інформації в системі:
+
+| Сутність / Таблиця | Класифікація даних | Рівень сховища | Гарячий TTL | Теплий TTL | Холодний TTL | Стратегія очищення / Ротації | GDPR обґрунтування |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`users`** | PII (Email, Пароль, Налаштування) | Hot | Необмежено (поки акаунт активний) | 30 днів після запиту на видалення (Grace Period) | — | Hard Delete каскадно через зовнішні ключі | Art. 17 (Right to be Forgotten) |
+| **`households`** | Організаційні дані | Hot | Необмежено (поки є $\ge 1$ учасник) | 14 днів після виходу останнього учасника | — | Фоновий демон видаляє пусті домогосподарства | Мінімізація даних (Art. 5.1c) |
+| **`products`** | Відкритий каталог (Нейтральні) | Hot | Постійно | — | — | Дані публічного каталогу безстрокові | Загальний інтерес / Відкриті знання |
+| **`inventory_items`** (Активні) | Оперативні запаси | Hot | До моменту повного списання (`quantity = 0`) | — | — | Перехід у стан списаного залишку | Виконання контракту (Art. 6.1b) |
+| **`inventory_items`** (Списані/Витрачені) | Історія утилізації та списань | Warm | — | 12 місяців | 3 роки (Parquet, анонімізовано) | Щомісячне партиційне архівація у S3, видалення з PG | Легітимний інтерес (Zero-Waste звітність) |
+| **`meal_logs`** & **`items`** | Особисті дані про здоров'я (Health PII) | Hot / Warm | 90 днів (Hot) | 12 місяців (Warm) | 3 роки (Cold, повна деперсоналізація) | Щомісячна ротація партицій `logged_at` | Явна згода (Art. 9 GDPR) |
+| **`nutrition_targets`** | Профіль цілей | Hot | Необмежено (поки діє ціль) | 2 роки (історія змін цілей) | — | Видалення старих ревізій через 24 міс. | Згода користувача |
+| **`recipes`** (Global) | Кулінарний каталог | Hot | Постійно | — | — | Не видаляється | Відкритий каталог |
+| **`recipes`** (Household) | Користувацький контент | Hot | До видалення автором | — | — | Каскадне видалення разом із домогосподарством | Власність користувача |
+| **`shopping_list_items`** (Некуплені) | Оперативні списки | Hot | Необмежено | — | — | Зберігається до здійснення покупки | Виконання завдання користувача |
+| **`shopping_list_items`** (Куплені) | Виконані покупки | Hot | 7 днів після покупки | 30 днів | — | Щоденний cron видаляє куплені елементи старіші 30 днів | Мінімізація даних |
+| **`outbox_messages`** | Системні події (Асинхронний транспорт) | Hot | До обробки (`PENDING`) | 7 днів (`PROCESSED`) | — | Щоденний cron очищає успішно оброблені події; помилкові зберігаються 30 днів | Системна надійність |
+| **`idempotency_records`** | Транзитні HTTP-токени | Hot | **24 години** (строгий TTL) | — | — | Щоденний cron: `DELETE WHERE expires_at < NOW()` | Запобігання повторним транзакціям |
+
+---
+
+### 8.3 Відповідність вимогам GDPR та політика приватності
+
+#### 1. Право на забуття (Right to be Forgotten - Стаття 17 GDPR)
+Коли користувач ініціює видалення свого профілю через ендпоінт `DELETE /api/v1/users/me`:
+1. **Каскадне знищення персональних зв'язків:** Завдяки конфігурації `ON DELETE CASCADE` у таблицях `users`, `household_members`, `nutrition_targets`, `idempotency_records`, всі персональні дані фізично видаляються з PostgreSQL.
+2. **Обробка спільних домогосподарств:** Якщо користувач був `Owner` у домогосподарстві:
+   - Якщо в домогосподарстві є інші учасники, право власності автоматично передається найстарішому учаснику за датою `joined_at`.
+   - Якщо інших учасників немає, домогосподарство та пов'язані з ним `inventory_items` та `shopping_list_items` каскадно видаляються.
+3. **Псевдонімізація та анонімізація для аналітики:**
+   Якщо системі потрібні історичні агреговані показники для національної статистики нутриціології, записи `meal_logs` від'єднуються від фізичної особи: поле `user_id` встановлюється в `00000000-0000-0000-0000-000000000000` (Cryptographic Blackhole), а будь-які персональні текстові примітки видаляються.
+
+#### 2. Право на перенесення даних (Data Portability - Стаття 20 GDPR)
+Користувач має право у будь-який момент завантажити повний архів своїх даних через виклик `GET /api/v1/users/me/export`. Система асинхронно формує ZIP-архів із вмістом:
+- `profile.json`: Метадані профілю та поточні налаштування.
+- `targets.json`: Історія цілей КБЖВ.
+- `meals_history.csv`: Деталізований щоденник усіх прийомів їжі з макросами та інгредієнтами.
+- `inventory_snapshot.csv`: Поточні запаси закріпленого домогосподарства.
+
+---
+
+### 8.4 Автоматизовані завдання очищення та Cron-архівація
+
+Для виконання політик ротації даних без ручного втручання налаштовано регулярні фонові задачі, що запускаються через механізм **Kubernetes CronJob** або вбудований планувальник **.NET BackgroundService** з лідерським блокуванням:
+
+```mermaid
+flowchart TD
+    Scheduler["Cron Scheduler<br/>(Every Night 02:00 UTC)"] --> Task1["Clean Idempotency<br/>DELETE WHERE expires_at < NOW()"]
+    Scheduler --> Task2["Purge Outbox<br/>DELETE WHERE status = 'PROCESSED'<br/>AND created_at < NOW() - 7 days"]
+    Scheduler --> Task3["Clean Purchased Items<br/>DELETE WHERE is_purchased = true<br/>AND updated_at < NOW() - 30 days"]
+    Scheduler --> Task4["Partition Maintenance<br/>Attach next month partition<br/>Archive & detach old partitions"]
+```
+
+#### SQL-скрипти щоденного обслуговування:
+```sql
+-- 1. Очищення застарілих ключів ідемпотентності
+DELETE FROM idempotency_records 
+WHERE expires_at < CURRENT_TIMESTAMP;
+
+-- 2. Очищення оброблених повідомлень Transactional Outbox старіших за 7 діб
+DELETE FROM outbox_messages 
+WHERE status = 'PROCESSED' 
+  AND created_at < (CURRENT_TIMESTAMP - INTERVAL '7 days');
+
+-- 3. Очищення застарілих куплених пунктів списку покупок
+DELETE FROM shopping_list_items 
+WHERE is_purchased = TRUE 
+  AND updated_at < (CURRENT_TIMESTAMP - INTERVAL '30 days');
+```
+
+---
+
+### 8.5 Архітектура декларативного партиціонування PostgreSQL для `meal_logs`
+
+Оскільки щоденник споживання їжі є найбільш динамічною та швидкозростаючою таблицею ($> 1	ext{ млн}$ записів на рік при 1000 активних користувачів), таблиця `meal_logs` оптимізована під **Range Partitioning за датою `logged_at`**:
+
+```sql
+-- Створення головної партиційованої таблиці
+CREATE TABLE meal_logs_partitioned (
+    id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    logged_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    meal_type VARCHAR(20) NOT NULL,
+    calories NUMERIC(7, 2) NOT NULL DEFAULT 0,
+    protein NUMERIC(6, 2) NOT NULL DEFAULT 0,
+    fat NUMERIC(6, 2) NOT NULL DEFAULT 0,
+    carbs NUMERIC(6, 2) NOT NULL DEFAULT 0,
+    idempotency_key UUID NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id, logged_at)
+) PARTITION BY RANGE (logged_at);
+
+-- Створення місячних партицій для 2026-2027 років
+CREATE TABLE meal_logs_y2026m11 PARTITION OF meal_logs_partitioned
+    FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00');
+
+CREATE TABLE meal_logs_y2026m12 PARTITION OF meal_logs_partitioned
+    FOR VALUES FROM ('2026-12-01 00:00:00+00') TO ('2027-01-01 00:00:00+00');
+
+-- Швидке від'єднання застарілої партиції без блокування читання
+-- ALTER TABLE meal_logs_partitioned DETACH PARTITION meal_logs_y2025m11 CONCURRENTLY;
+-- COPY meal_logs_y2025m11 TO PROGRAM 'gzip > /archive/meals_2025_11.csv.gz' WITH CSV HEADER;
+-- DROP TABLE meal_logs_y2025m11;
+```
+
+**Переваги підходу:**
+1. **Partition Pruning:** Запити користувача за поточний місяць сканують виключно індекс поточної партиції, зменшуючи використання пам'яті RAM buffer pool на $85\%$.
+2. **Миттєве очищення (Zero-IO Deletion):** Видалення партиції за $N$ місяців назад виконується командою `DROP TABLE`, що займає $\sim 5	ext{ ms}$ незалежно від кількості рядків і не викликає роздування (bloat) бази та вакуумізації `VACUUM`.
