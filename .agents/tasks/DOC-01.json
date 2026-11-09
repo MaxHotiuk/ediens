@@ -1,9 +1,9 @@
 {
   "id": "DOC-01",
   "title": "Data Model (ER + 8 Entities + Retention Policy) & Resiliency Model (Consensus, Batching, Streaming, CID & 5x3 RMA Workbook)",
-  "status": "DONE",
+  "status": "IN_PROGRESS",
   "assigned_to": "Maxs-MacBook-Air",
-  "updated_at": "2026-11-09T13:59:40Z",
+  "updated_at": "2026-11-09T15:14:39Z",
   "branch": "docs/DOC-01-data-and-resiliency-models",
   "dependencies": [
     "FIX-07"
