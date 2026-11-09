@@ -1,0 +1,33 @@
+{
+  "id": "DOC-03",
+  "title": "Functional Analytics (15 Metrics + 3 Funnels) & Operational Monitoring/Alerting (15 Ops Metrics + 10 Alert Thresholds & Playbooks)",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": "2026-11-09T13:49:56Z",
+  "branch": "docs/DOC-03-analytics-and-monitoring-models",
+  "dependencies": [
+    "FIX-07"
+  ],
+  "allowed_paths": [
+    "docs/Ediens_SRS/11-analytics-model.md",
+    "docs/Ediens_SRS/12-monitoring-alerting-model.md",
+    "infra/monitoring/alerts.yml",
+    "infra/monitoring/prometheus.yml",
+    "docs/Ediens_SRS.md"
+  ],
+  "deliverables": [
+    "docs/Ediens_SRS/11-analytics-model.md",
+    "docs/Ediens_SRS/12-monitoring-alerting-model.md",
+    "infra/monitoring/alerts.yml",
+    "infra/monitoring/prometheus.yml",
+    "docs/Ediens_SRS.md"
+  ],
+  "acceptance_criteria": [
+    "11-analytics-model.md: Master table of 15 Functional Product Metrics specifying ID, Name, Mathematical Formula, Dimensions/Labels, Event Source, Link to Functional Requirements FR-01..FR-12, and Business Goal.",
+    "11-analytics-model.md: 3 End-to-End Conversion Funnels (Funnel 1: Zero-Waste Expiry-to-Cook, Funnel 2: Barcode Scan-to-Daily Macro Target Hit, Funnel 3: Depleted Stock-to-Synced Shopping Purchase) with Mermaid diagrams, step-by-step conversion benchmarks, and drop-off analysis.",
+    "12-monitoring-alerting-model.md: Master table of 15 Operational & Infrastructure Metrics specifying ID, Prometheus Metric Name, Type (Counter/Gauge/Histogram), Dimensions, Linked Infra Resource, Collection Method via OpenTelemetry/Exporters, and Scrape Interval.",
+    "12-monitoring-alerting-model.md & infra/monitoring/alerts.yml: Complete Alerting Rules Matrix (10 Alerts) with Min/Max acceptable thresholds, Warn/Critical levels, evaluation 'for' window, Pager/Notification routing, and step-by-step Incident Mitigation Playbooks (Runbooks) for all 10 alerts.",
+    "infra/monitoring/prometheus.yml: Prometheus scrape configuration defining scrape jobs, metrics path, and rule files for API, Redis, Postgres, and node exporters.",
+    "docs/Ediens_SRS.md: Update master SRS index and document map to link all newly expanded Phase 3 sections (07 through 12) seamlessly."
+  ]
+}

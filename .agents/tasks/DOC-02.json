@@ -1,0 +1,28 @@
+{
+  "id": "DOC-02",
+  "title": "Security Threat Model (3 Flows + 12 Mitigations) & Cloud/Self-Hosted Infrastructure Diagram",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": "2026-11-09T13:49:56Z",
+  "branch": "docs/DOC-02-security-and-deployment-models",
+  "dependencies": [
+    "FIX-07"
+  ],
+  "allowed_paths": [
+    "docs/Ediens_SRS/09-security-model.md",
+    "docs/Ediens_SRS/10-deployment-model.md",
+    "scripts/generate_infra_diagram.py"
+  ],
+  "deliverables": [
+    "docs/Ediens_SRS/09-security-model.md",
+    "docs/Ediens_SRS/10-deployment-model.md",
+    "scripts/generate_infra_diagram.py"
+  ],
+  "acceptance_criteria": [
+    "09-security-model.md: Complete STRIDE Threat Modeling with Data Flow Diagrams (DFD with Trust Boundaries) for 3 core project flows: (1) Household Auth & RBAC Invitation Flow, (2) Atomic Recipe Cook & Inventory Deduction Flow, (3) Barcode External Lookup & Offline Shopping List Sync Flow.",
+    "09-security-model.md: Mitigation Plan Table for 12 Critical Threats detailing STRIDE category, CVSS v3.1 vector / severity, affected component, exact code/infra mitigation in .NET 10 / React / Nginx / PostgreSQL, and verification test reference.",
+    "10-deployment-model.md: Standard AWS/Cloud-style Infrastructure Architecture Diagram (Mermaid architecture diagram + scripts/generate_infra_diagram.py using diagrams.mingrammer.com) showing Public Zone (Cloudflare DNS/WAF/Tunnel), Tailscale Mesh VPN, DMZ/Ingress (Nginx Reverse Proxy), App Tier (.NET 10 API replicas, Background Worker), Data & Cache Tier (PostgreSQL Primary/Backup, Redis), and Observability Tier (Prometheus, Alertmanager, Grafana).",
+    "10-deployment-model.md: Complete Resource Specification & Sizing Table defining CPU, RAM, storage, network bandwidth, container replica counts, and volume mount configurations for each deployment tier.",
+    "scripts/generate_infra_diagram.py: Standalone executable Python diagram generator producing visual PNG architecture diagrams corresponding to the deployment topology."
+  ]
+}

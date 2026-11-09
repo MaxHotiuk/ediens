@@ -1,0 +1,26 @@
+{
+  "id": "DOC-01",
+  "title": "Data Model (ER + 8 Entities + Retention Policy) & Resiliency Model (Consensus, Batching, Streaming, CID & 5x3 RMA Workbook)",
+  "status": "TODO",
+  "assigned_to": null,
+  "updated_at": "2026-11-09T13:49:56Z",
+  "branch": "docs/DOC-01-data-and-resiliency-models",
+  "dependencies": [
+    "FIX-07"
+  ],
+  "allowed_paths": [
+    "docs/Ediens_SRS/07-data-model.md",
+    "docs/Ediens_SRS/08-resiliency-model.md"
+  ],
+  "deliverables": [
+    "docs/Ediens_SRS/07-data-model.md",
+    "docs/Ediens_SRS/08-resiliency-model.md"
+  ],
+  "acceptance_criteria": [
+    "07-data-model.md: Complete Mermaid erDiagram and detailed specification of all 8 core entities (Households, Users, Products, InventoryBatches, Recipes, RecipeIngredients, MealLogs, ShoppingListItems + OutboxMessages/IdempotencyRecords), including primary/foreign keys, indices, constraints, and JSON payload schemas.",
+    "07-data-model.md: Complete Data Retention Policy Classification Matrix (Hot/Warm/Cold/Purge tiers, retention TTLs, GDPR compliance, cleanup cron jobs, and PostgreSQL archival/partitioning strategy).",
+    "08-resiliency-model.md: Detailed architectural justification and implementation design of Consensus (Redis Redlock / Raft leader election for distributed background workers), Batching (Shopping List offline bulk sync & Outbox batch processor), Streaming (SSE / SignalR real-time household fridge & macro updates), and Consistency (Strong vs. Eventual consistency boundaries).",
+    "08-resiliency-model.md: Component Interaction Diagram (CID) specifying 6 distinct core interactions (I-01 through I-06) across client, reverse proxy, API, worker, database, cache, and external services.",
+    "08-resiliency-model.md: Comprehensive RMA (Reliability, Maintainability, Availability) Failure Mode Workbook covering all 6 interactions × 3+ failure modes each (18 total failure scenarios) with Failure Cause, Detection Mechanism, Recovery/Retry Policy, Timeout, Circuit Breaker state, and SLA Impact."
+  ]
+}
