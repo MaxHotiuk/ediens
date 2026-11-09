@@ -1,0 +1,50 @@
+# ==============================================================================
+# Prometheus Configuration for ēdiens Platform (Top-level Monitoring)
+# ==============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+rule_files:
+  - "alerts.yml"
+  - "prometheus/alert_rules.yml"
+
+alerting:
+  alertmanagers:
+    - scheme: http
+      static_configs:
+        - targets:
+            - "alertmanager:9093"
+
+scrape_configs:
+  # Prometheus Self-Monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ēdiens Web API Metrics (.NET 10 Kestrel)
+  - job_name: "ediens-api"
+    metrics_path: "/metrics"
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["ediens-api:8080"]
+        labels:
+          application: "ediens-api"
+          environment: "production"
+
+  # ēdiens Background Worker Metrics
+  - job_name: "ediens-worker"
+    metrics_path: "/metrics"
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["ediens-worker:8081"]
+        labels:
+          application: "ediens-worker"
+          environment: "production"
+
+  # Prometheus Alertmanager
+  - job_name: "alertmanager"
+    static_configs:
+      - targets: ["alertmanager:9093"]

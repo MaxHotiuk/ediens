@@ -15,6 +15,7 @@
 | :--- | :--- | :--- | :--- |
 | **0.1.0** | 2026-10-31 | Genesis Engineering Team | Початковий каркас структури документації та репозиторію. |
 | **1.0.0** | 2026-10-31 | Core Architecture Agent (TASK-01) | Повне наповнення Майстер-індексу SRS за стандартами jam01/USAID SRS: специфікація акторів, персон, функціональних вимог (FR-01..FR-12), реляційної моделі даних PostgreSQL, токенів конкурентності `xmin`, Transactional Outbox та Idempotency Store. |
+| **2.0.0** | 2026-11-09 | Advanced Systems Architecture & SRE Team (Phase 3) | Комплексне інженерне розширення Розділів 07–12: 13 реляційних сутностей, матриця Data Retention, модель розподілених даних (Consensus, Batching, Streaming), матриця RMA 6x3, STRIDE моделювання загроз та 12 пом'якшень, модель розгортання Zero-Trust Cloudflare/Tailscale, 15 продуктових метрик FM-01..FM-15, 3 конверсійні воронки, 15 операційних метрик OM-01..OM-15, 10 правил Prometheus AL-01..AL-10 та SRE Runbooks. |
 
 ---
 
@@ -198,12 +199,12 @@ docs/
 | **04** | **Архітектура системи** | [`docs/Ediens_SRS/04-architecture.md`](./Ediens_SRS/04-architecture.md) | C4 Container & Component діаграми, топологія розподіленої системи, взаємодія .NET 10 Minimal API, Redis L2, React 19 Frontend. |
 | **05** | **Обробка помилок та RFC 9457** | [`docs/Ediens_SRS/05-error-handling.md`](./Ediens_SRS/05-error-handling.md) | Повна схема Problem Details, словник колізій, правила реакції фронтенд-компонентів на статус-коди 400, 403, 404, 409, 422, 429. |
 | **06** | **Патерни конкурентності** | [`docs/Ediens_SRS/06-concurrency-patterns.md`](./Ediens_SRS/06-concurrency-patterns.md) | 5 розподілених патернів: Optimistic Locking через `xmin`, Idempotency + Redis Distributed Lock, Transactional Outbox + SKIP LOCKED, Pessimistic Row Locking, Singleflight HybridCache. Діаграми Mermaid sequenceDiagram. |
-| **07** | **Модель даних PostgreSQL** | [`docs/Ediens_SRS/07-data-model.md`](./Ediens_SRS/07-data-model.md) | Детальна ER-діаграма Mermaid, DDL 13 таблиць, системні стовпці `xmin` для EF Core 10, таблиці `outbox_messages` та `idempotency_records`, стратегія індексації FEFO. |
-| **08** | **Модель стійкості (Resiliency)** | [`docs/Ediens_SRS/08-resiliency-model.md`](./Ediens_SRS/08-resiliency-model.md) | Політики Polly (.NET Resilience), таймаути, Circuit Breakers, degraded mode при відмові зовнішнього сервісу штрих-кодів. |
-| **09** | **Модель безпеки (Security)** | [`docs/Ediens_SRS/09-security-model.md`](./Ediens_SRS/09-security-model.md) | Модель автентифікації на базі JWT, Tenant Scoping за `household_id`, захист від CSRF/XSS, алгоритми хешування паролів (Argon2id / BCrypt). |
-| **10** | **Модель розгортання (Deployment)** | [`docs/Ediens_SRS/10-deployment-model.md`](./Ediens_SRS/10-deployment-model.md) | Конфігурація Docker Compose, мережеві мости, volumes для збереження даних, Healthcheck ендпоінти, інструкції для production/staging. |
-| **11** | **Модель аналітики (Analytics)** | [`docs/Ediens_SRS/11-analytics-model.md`](./Ediens_SRS/11-analytics-model.md) | Математичні формули скорингу страв, статистика зменшення харчових відходів (Food Waste Index), метрики точності дотримання макро-цілей. |
-| **12** | **Моніторинг та алертинг** | [`docs/Ediens_SRS/12-monitoring-alerting-model.md`](./Ediens_SRS/12-monitoring-alerting-model.md) | Метрики Prometheus, розподілений трейсинг W3C TraceContext, експорт структурованих JSON-логів, правила сповіщень про відмови. |
+| **07** | **Модель даних PostgreSQL** | [`docs/Ediens_SRS/07-data-model.md`](./Ediens_SRS/07-data-model.md) | Детальна ER-діаграма Mermaid, DDL 13 реляційних сутностей, UUIDv7, токени `xmin`, політика зберігання даних Data Retention & GDPR Purge Matrix. |
+| **08** | **Модель стійкості (Resiliency)** | [`docs/Ediens_SRS/08-resiliency-model.md`](./Ediens_SRS/08-resiliency-model.md) | Розподілені парадигми (Consensus Redlock/Advisory locks, Batching, Streaming SSE/SignalR, Consistency), Component Interaction Diagram (CID, 6 взаємодій) та матриця відмов RMA (6x3 = 18 сценаріїв). |
+| **09** | **Модель безпеки (Security)** | [`docs/Ediens_SRS/09-security-model.md`](./Ediens_SRS/09-security-model.md) | STRIDE моделювання загроз із DFD для 3 потоків (Auth/RBAC, 1-Click Cook, Barcode/Sync), матриця 12 критичних загроз T-01..T-12, EF Core Global Query Filters, захист від IDOR та Double Spend. |
+| **10** | **Модель розгортання (Deployment)** | [`docs/Ediens_SRS/10-deployment-model.md`](./Ediens_SRS/10-deployment-model.md) | Топологія хмарного/self-hosted розгортання, Zero-Trust Edge (Cloudflare Tunnel, Tailscale VPN), Docker Network сегментація, таблиця сайзингу ресурсів та регламенти Zero-Downtime/DR. |
+| **11** | **Модель аналітики (Analytics)** | [`docs/Ediens_SRS/11-analytics-model.md`](./Ediens_SRS/11-analytics-model.md) | Майстер-таблиця 15 функціональних метрик FM-01..FM-15, 3 наскрізні конверсійні воронки (Zero-Waste, Precision Nutrition, Closed-Loop Restocking) та аналіз дроп-офів. |
+| **12** | **Моніторинг та алертинг** | [`docs/Ediens_SRS/12-monitoring-alerting-model.md`](./Ediens_SRS/12-monitoring-alerting-model.md) | OpenTelemetry інструментування, 15 операційних метрик OM-01..OM-15, матриця 10 правил Prometheus AL-01..AL-10 та покрокові SRE Runbooks ліквідації інцидентів. |
 
 ---
 
