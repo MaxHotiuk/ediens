@@ -304,6 +304,88 @@ STATUS=$(curl -s -o "$TMP_DIR/metrics.txt" -w "%{http_code}" \
   "$BASE_URL/metrics")
 assert_status "GET /metrics" 200 "$STATUS" ""
 
+# Route 15: GET /api/v1/products/search (QOL-03 Text Search)
+STATUS=$(curl -s -o "$TMP_DIR/product_search.json" -w "%{http_code}" \
+  "$BASE_URL/api/v1/products/search?query=вівсяні&limit=5")
+assert_status "GET /api/v1/products/search" 200 "$STATUS" "$(cat "$TMP_DIR/product_search.json" 2>/dev/null)"
+SEARCH_COUNT=$(jq '. | length' "$TMP_DIR/product_search.json" 2>/dev/null || echo "0")
+if [ "$SEARCH_COUNT" -gt 0 ]; then
+  echo "  ✓ Product text search returned $SEARCH_COUNT matching items."
+  SUCCESSES=$((SUCCESSES + 1))
+else
+  echo "  [FAIL] Product text search returned 0 items for query 'вівсяні'."
+  ERRORS=$((ERRORS + 1))
+fi
+
+# Route 16: POST /api/v1/households/join (QOL-05 Household Join via Invite Code)
+STATUS=$(curl -s -o "$TMP_DIR/household_join.json" -w "%{http_code}" \
+  -X POST "$BASE_URL/api/v1/households/join" \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: $OLEG_USER" \
+  -d '{"inviteCode": "EDIENS-77"}')
+assert_status "POST /api/v1/households/join" 200 "$STATUS" "$(cat "$TMP_DIR/household_join.json" 2>/dev/null)"
+
+# Route 17: GET /api/v1/households/{id}/members (QOL-05 Household Member Roster)
+STATUS=$(curl -s -o "$TMP_DIR/household_members.json" -w "%{http_code}" \
+  -H "X-User-Id: $OLEG_USER" \
+  "$BASE_URL/api/v1/households/$MAIN_HOUSEHOLD/members")
+assert_status "GET /api/v1/households/{id}/members" 200 "$STATUS" "$(cat "$TMP_DIR/household_members.json" 2>/dev/null)"
+
+# Route 18: POST /api/v1/households/{id}/shopping-list/transfer-to-inventory (QOL-01)
+TRANSFER_ITEM_ID="0192e2b5-$(head -c 2 /dev/urandom | xxd -p)-7000-8000-000000000099"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/households/$MAIN_HOUSEHOLD/shopping-list/sync" \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: $OLEG_USER" \
+  -d "{
+    \"lastSyncTimestamp\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\",
+    \"clientChanges\": [
+      {
+        \"id\": \"$TRANSFER_ITEM_ID\",
+        \"productName\": \"Банани свіжі куплені\",
+        \"quantity\": 2,
+        \"unit\": \"pcs\",
+        \"isPurchased\": true,
+        \"clientUpdatedAt\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
+      }
+    ]
+  }"
+
+STATUS=$(curl -s -o "$TMP_DIR/shop_transfer.json" -w "%{http_code}" \
+  -X POST "$BASE_URL/api/v1/households/$MAIN_HOUSEHOLD/shopping-list/transfer-to-inventory" \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: $OLEG_USER" \
+  -d "{
+    \"items\": [
+      {
+        \"itemId\": \"$TRANSFER_ITEM_ID\",
+        \"location\": \"Pantry\",
+        \"quantity\": 2,
+        \"unit\": \"pcs\"
+      }
+    ]
+  }")
+assert_status "POST /api/v1/households/{id}/shopping-list/transfer-to-inventory" 200 "$STATUS" "$(cat "$TMP_DIR/shop_transfer.json" 2>/dev/null)"
+
+TRANSFERRED_COUNT=$(jq -r '.transferredCount // 0' "$TMP_DIR/shop_transfer.json" 2>/dev/null || echo "0")
+if [ "$TRANSFERRED_COUNT" -ge 1 ]; then
+  echo "  ✓ Shopping list to inventory transfer succeeded (transferred count: $TRANSFERRED_COUNT)."
+  SUCCESSES=$((SUCCESSES + 1))
+  
+  if command -v docker >/dev/null 2>&1 && docker compose ps --services 2>/dev/null | grep -q "postgres"; then
+    PG_INV_COUNT=$(docker compose exec -T postgres psql -U postgres -d ediens -tAc "SELECT count(*) FROM inventory_items WHERE \"HouseholdId\" = '$MAIN_HOUSEHOLD' AND \"Location\" = 'Pantry';" 2>/dev/null || echo "")
+    if [ -n "$PG_INV_COUNT" ] && [ "$PG_INV_COUNT" -ge 1 ]; then
+      echo "  ✓ Physical PostgreSQL persistence verified for transferred inventory items (count: $PG_INV_COUNT)."
+      SUCCESSES=$((SUCCESSES + 1))
+    fi
+  elif command -v psql >/dev/null 2>&1; then
+    PG_INV_COUNT=$(PGPASSWORD="${POSTGRES_PASSWORD:-ediens_secure_password}" psql -h localhost -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-ediens}" -tAc "SELECT count(*) FROM inventory_items WHERE \"HouseholdId\" = '$MAIN_HOUSEHOLD' AND \"Location\" = 'Pantry';" 2>/dev/null || echo "")
+    if [ -n "$PG_INV_COUNT" ] && [ "$PG_INV_COUNT" -ge 1 ]; then
+      echo "  ✓ Physical PostgreSQL persistence verified for transferred inventory items (count: $PG_INV_COUNT)."
+      SUCCESSES=$((SUCCESSES + 1))
+    fi
+  fi
+fi
+
 echo ""
 echo "--- 3. Negative RFC 9457 Error Contract Suite ---"
 

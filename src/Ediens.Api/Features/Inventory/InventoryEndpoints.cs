@@ -219,7 +219,7 @@ public static class InventoryEndpoints
         // 4. PATCH /api/v1/inventory/items/{id}
         group.MapPatch("/{id:guid}", async (
             Guid id,
-            UpdateInventoryItemQuantityRequest request,
+            UpdateInventoryItemRequest request,
             HttpContext context,
             EdiensDbContext db,
             CancellationToken ct) =>
@@ -267,20 +267,60 @@ public static class InventoryEndpoints
                     lastModifiedAt: item.UpdatedAt);
             }
 
+            // Валідація локації, якщо передано
+            if (!string.IsNullOrWhiteSpace(request.Location))
+            {
+                var validLocations = new[] { "Fridge", "Freezer", "Pantry" };
+                if (!validLocations.Contains(request.Location, StringComparer.OrdinalIgnoreCase))
+                {
+                    return EdiensResults.ValidationProblem(
+                        context.Request.Path,
+                        errors: new Dictionary<string, string[]>
+                        {
+                            ["location"] = new[] { $"Location '{request.Location}' is invalid. Permitted: Fridge, Freezer, Pantry." }
+                        });
+                }
+                item.Location = validLocations.First(l => string.Equals(l, request.Location, StringComparison.OrdinalIgnoreCase));
+            }
+
+            // Оновлення терміну придатності, якщо передано
+            if (request.ExpiresAt.HasValue)
+            {
+                item.ExpiresAt = request.ExpiresAt.Value.ToUniversalTime();
+            }
+
+            // Розрахунок нової кількості (підтримка як quantity, так і quantityDelta)
+            decimal newQuantity;
+            if (request.Quantity.HasValue)
+            {
+                newQuantity = request.Quantity.Value;
+            }
+            else if (request.QuantityDelta.HasValue)
+            {
+                newQuantity = item.Quantity + request.QuantityDelta.Value;
+            }
+            else
+            {
+                newQuantity = item.Quantity;
+            }
+
             // Перевірка інваріанту: невід'ємний залишок
-            var newQuantity = item.Quantity + request.QuantityDelta;
             if (newQuantity < 0)
             {
+                var requestedDeduction = request.QuantityDelta.HasValue
+                    ? Math.Abs(request.QuantityDelta.Value)
+                    : Math.Abs(newQuantity - item.Quantity);
+
                 return EdiensResults.ProblemDetails(
                     StatusCodes.Status422UnprocessableEntity,
                     "Inventory stock insufficient to complete requested action.",
-                    $"Cannot deduct {Math.Abs(request.QuantityDelta)} {item.Unit}: available quantity is only {item.Quantity} {item.Unit}.",
+                    $"Cannot deduct {requestedDeduction} {item.Unit}: available quantity is only {item.Quantity} {item.Unit}.",
                     ErrorCodes.InsufficientInventory,
                     context.Request.Path,
                     new
                     {
                         currentQuantity = item.Quantity,
-                        requestedDeduction = Math.Abs(request.QuantityDelta),
+                        requestedDeduction = requestedDeduction,
                         unit = item.Unit
                     });
             }
@@ -293,13 +333,19 @@ public static class InventoryEndpoints
             item.UpdatedAt = DateTime.UtcNow;
             item.Version += 1; // Оновлюємо concurrency token
 
+            // Автоматичне очищення / видалення партії при нульовому залишку
+            if (newQuantity == 0)
+            {
+                db.InventoryItems.Remove(item);
+            }
+
             await db.SaveChangesAsync(ct);
 
             context.Response.Headers.ETag = ETagHelper.Format(item.Version);
             return Results.Ok(ToResponse(item));
         })
-        .WithName("UpdateInventoryItemQuantity")
-        .WithSummary("Змінити кількість або списати частину партії (If-Match ETag)");
+        .WithName("UpdateInventoryItem")
+        .WithSummary("Змінити партію (локація, термін придатності, кількість) або списати частину партії (If-Match ETag)");
 
         // 5. DELETE /api/v1/inventory/items/{id}
         group.MapDelete("/{id:guid}", async (

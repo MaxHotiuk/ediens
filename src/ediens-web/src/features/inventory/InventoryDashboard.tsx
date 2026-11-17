@@ -3,6 +3,7 @@ import { InventoryItem, StorageLocation, CreateInventoryItemRequest } from '../.
 import { ediensApi, DEFAULT_HOUSEHOLD_ID, EdiensApiError } from '../../api/client';
 import { InventoryItemCard } from './InventoryItemCard';
 import { AddInventoryModal } from './AddInventoryModal';
+import { EditInventoryModal } from './EditInventoryModal';
 import { ConflictResolutionModal } from '../../components/ui/ConflictResolutionModal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -17,6 +18,8 @@ import {
   AlertTriangle,
   Loader2,
   RefreshCw,
+  GitFork,
+  ArrowUpDown,
 } from 'lucide-react';
 
 export function InventoryDashboard({
@@ -28,7 +31,11 @@ export function InventoryDashboard({
   const [isLoading, setIsLoading] = useState(true);
   const [selectedLocation, setSelectedLocation] = useState<StorageLocation | 'All'>('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [freshnessFilter, setFreshnessFilter] = useState<'ALL' | 'CRITICAL' | 'EXPIRING_SOON' | 'FRESH'>('ALL');
+  const [sortBy, setSortBy] = useState<'FEFO' | 'NAME' | 'QUANTITY'>('FEFO');
+  const [showDebugActions, setShowDebugActions] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
 
   // 409 Conflict Modal State
   const [conflictItem, setConflictItem] = useState<{
@@ -60,10 +67,27 @@ export function InventoryDashboard({
     loadItems();
   }, [loadItems]);
 
-  // Filtered by search
-  const filteredItems = items.filter((item) =>
-    item.productName.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filtered & Sorted items
+  const filteredItems = items
+    .filter((item) => {
+      if (freshnessFilter === 'CRITICAL') return item.freshnessStatus === 'CRITICAL' || item.freshnessStatus === 'EXPIRED';
+      if (freshnessFilter === 'EXPIRING_SOON') return item.freshnessStatus === 'EXPIRING_SOON';
+      if (freshnessFilter === 'FRESH') return item.freshnessStatus === 'FRESH';
+      return true;
+    })
+    .filter((item) =>
+      item.productName.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .sort((a, b) => {
+      if (sortBy === 'NAME') {
+        return a.productName.localeCompare(b.productName, 'uk');
+      }
+      if (sortBy === 'QUANTITY') {
+        return b.quantity - a.quantity;
+      }
+      // Default: FEFO (First Expired, First Out)
+      return new Date(a.expiresAt).getTime() - new Date(b.expiresAt).getTime();
+    });
 
   // Summary counts
   const totalCount = items.length;
@@ -78,12 +102,21 @@ export function InventoryDashboard({
         { quantityDelta: delta, markOpened: false },
         item.etag
       );
-      setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
-      onShowToast(
-        'Продукт спожито',
-        `Списано ${Math.abs(delta)} ${item.unit} з «${item.productName}». Новий залишок: ${updated.quantity} ${updated.unit}`,
-        'success'
-      );
+      if (updated.quantity === 0) {
+        setItems((prev) => prev.filter((i) => i.id !== item.id));
+        onShowToast(
+          'Продукт повністю спожито',
+          `«${item.productName}» списано до 0 і видалено зі складу.`,
+          'info'
+        );
+      } else {
+        setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
+        onShowToast(
+          'Продукт спожито',
+          `Списано ${Math.abs(delta)} ${item.unit} з «${item.productName}». Новий залишок: ${updated.quantity} ${updated.unit}`,
+          'success'
+        );
+      }
     } catch (err: unknown) {
       if (err instanceof EdiensApiError && err.status === 409) {
         // Concurrency conflict! Extract RFC 9457 extensions
@@ -111,13 +144,28 @@ export function InventoryDashboard({
     }
   };
 
-  const handleDelete = async (item: InventoryItem) => {
+  const handleDelete = async (item: InventoryItem, reason?: string) => {
     try {
-      await ediensApi.inventory.deleteItem(item.id);
+      await ediensApi.inventory.deleteItem(item.id, reason);
       setItems((prev) => prev.filter((i) => i.id !== item.id));
       onShowToast('Партію видалено', `«${item.productName}» списано з інвентарю.`, 'info');
     } catch (err: unknown) {
       const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка видалення партії';
+      onShowToast('Помилка', msg, 'error');
+    }
+  };
+
+  const handleSpoil = async (item: InventoryItem) => {
+    try {
+      await ediensApi.inventory.deleteItem(item.id, 'SPOILED');
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+      onShowToast(
+        'Списано як зіпсоване',
+        `«${item.productName}» списано з причиною SPOILED. Подію зафіксовано в Outbox.`,
+        'warning'
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка списання як зіпсоване';
       onShowToast('Помилка', msg, 'error');
     }
   };
@@ -177,7 +225,19 @@ export function InventoryDashboard({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Debug Toggle for 409 test */}
+          <Button
+            variant={showDebugActions ? "default" : "outline"}
+            size="sm"
+            icon={<GitFork className={`h-3.5 w-3.5 ${showDebugActions ? 'text-zinc-950' : 'text-amber-400'}`} />}
+            onClick={() => setShowDebugActions(!showDebugActions)}
+            title="Перемкнути відображення кнопок тестування 409 Conflict (ETag OCC)"
+            className={showDebugActions ? "bg-amber-400 text-zinc-950 hover:bg-amber-300 border-amber-400" : "text-amber-400 border-amber-500/40 hover:bg-amber-950/30"}
+          >
+            {showDebugActions ? 'Тест-панель: Увімкнено' : '409 Тест'}
+          </Button>
+
           <Button
             variant="outline"
             size="sm"
@@ -199,38 +259,78 @@ export function InventoryDashboard({
         </div>
       </div>
 
-      {/* FEFO Metric Summary Ribbon */}
+      {/* FEFO Metric Summary Ribbon (Interactive Click Filters) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Card className="p-3.5 border-zinc-800/80 bg-zinc-950/60">
-          <div className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Всього партій</div>
+        <button
+          type="button"
+          onClick={() => setFreshnessFilter('ALL')}
+          className={`text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
+            freshnessFilter === 'ALL'
+              ? 'border-zinc-500 bg-zinc-900/90 ring-2 ring-zinc-500/40 shadow-lg shadow-black/50'
+              : 'border-zinc-800/80 bg-zinc-950/60 hover:border-zinc-700 hover:bg-zinc-900/40'
+          }`}
+        >
+          <div className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Всього партій</div>
           <div className="text-2xl font-bold font-mono text-zinc-100 mt-0.5">{totalCount}</div>
-          <div className="text-[10px] text-zinc-500 font-mono mt-0.5">Всі локації</div>
-        </Card>
+          <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
+            {freshnessFilter === 'ALL' ? '● Активний фільтр' : 'Всі локації'}
+          </div>
+        </button>
 
-        <Card className="p-3.5 border-rose-900/40 bg-rose-950/20">
+        <button
+          type="button"
+          onClick={() => setFreshnessFilter(freshnessFilter === 'CRITICAL' ? 'ALL' : 'CRITICAL')}
+          className={`text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
+            freshnessFilter === 'CRITICAL'
+              ? 'border-rose-500 bg-rose-950/40 ring-2 ring-rose-500/50 shadow-lg shadow-rose-950/60'
+              : 'border-rose-900/40 bg-rose-950/20 hover:border-rose-800/60 hover:bg-rose-950/30'
+          }`}
+        >
           <div className="text-[11px] font-medium text-rose-400 uppercase tracking-wider flex items-center gap-1">
             <AlertTriangle className="h-3 w-3 text-rose-400" />
             <span>Критичні (&lt;24 год)</span>
           </div>
           <div className="text-2xl font-bold font-mono text-rose-300 mt-0.5">{criticalCount}</div>
-          <div className="text-[10px] text-rose-400/70 font-mono mt-0.5">Потребують споживання</div>
-        </Card>
+          <div className="text-[10px] text-rose-400/80 font-mono mt-0.5">
+            {freshnessFilter === 'CRITICAL' ? '● Фільтр увімкнено' : 'Потребують споживання'}
+          </div>
+        </button>
 
-        <Card className="p-3.5 border-amber-900/40 bg-amber-950/20">
+        <button
+          type="button"
+          onClick={() => setFreshnessFilter(freshnessFilter === 'EXPIRING_SOON' ? 'ALL' : 'EXPIRING_SOON')}
+          className={`text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
+            freshnessFilter === 'EXPIRING_SOON'
+              ? 'border-amber-500 bg-amber-950/40 ring-2 ring-amber-500/50 shadow-lg shadow-amber-950/60'
+              : 'border-amber-900/40 bg-amber-950/20 hover:border-amber-800/60 hover:bg-amber-950/30'
+          }`}
+        >
           <div className="text-[11px] font-medium text-amber-400 uppercase tracking-wider">Спливають (1–3 дні)</div>
           <div className="text-2xl font-bold font-mono text-amber-300 mt-0.5">{warningCount}</div>
-          <div className="text-[10px] text-amber-400/70 font-mono mt-0.5">Рекомендовано для рецептів</div>
-        </Card>
+          <div className="text-[10px] text-amber-400/80 font-mono mt-0.5">
+            {freshnessFilter === 'EXPIRING_SOON' ? '● Фільтр увімкнено' : 'Рекомендовано для рецептів'}
+          </div>
+        </button>
 
-        <Card className="p-3.5 border-emerald-900/40 bg-emerald-950/20">
+        <button
+          type="button"
+          onClick={() => setFreshnessFilter(freshnessFilter === 'FRESH' ? 'ALL' : 'FRESH')}
+          className={`text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
+            freshnessFilter === 'FRESH'
+              ? 'border-emerald-500 bg-emerald-950/40 ring-2 ring-emerald-500/50 shadow-lg shadow-emerald-950/60'
+              : 'border-emerald-900/40 bg-emerald-950/20 hover:border-emerald-800/60 hover:bg-emerald-950/30'
+          }`}
+        >
           <div className="text-[11px] font-medium text-emerald-400 uppercase tracking-wider">Свіжі (&gt;3 днів)</div>
           <div className="text-2xl font-bold font-mono text-emerald-300 mt-0.5">{freshCount}</div>
-          <div className="text-[10px] text-emerald-400/70 font-mono mt-0.5">Безпечний запас</div>
-        </Card>
+          <div className="text-[10px] text-emerald-400/80 font-mono mt-0.5">
+            {freshnessFilter === 'FRESH' ? '● Фільтр увімкнено' : 'Безпечний запас'}
+          </div>
+        </button>
       </div>
 
-      {/* Filter Tabs & Search Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3 rounded-xl bg-zinc-950 border border-zinc-800/80">
+      {/* Filter Tabs, Sorting Dropdown & Search Bar */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3 rounded-xl bg-zinc-950 border border-zinc-800/80">
         <div className="flex items-center gap-1.5 overflow-x-auto">
           {[
             { id: 'All', label: 'Всі локації', icon: null },
@@ -253,13 +353,30 @@ export function InventoryDashboard({
           ))}
         </div>
 
-        <div className="w-full md:w-72">
-          <Input
-            placeholder="Швидкий пошук за назвою..."
-            prefixIcon={<Search className="h-3.5 w-3.5" />}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+          {/* Sorting Dropdown */}
+          <div className="relative flex items-center">
+            <ArrowUpDown className="absolute left-2.5 h-3.5 w-3.5 text-zinc-500 pointer-events-none" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'FEFO' | 'NAME' | 'QUANTITY')}
+              className="w-full sm:w-auto pl-8 pr-4 py-1.5 text-xs font-medium rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-200 hover:border-zinc-700 focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
+              title="Критерій сортування списку партій"
+            >
+              <option value="FEFO">За терміном придатності (FEFO)</option>
+              <option value="NAME">За назвою (А-Я)</option>
+              <option value="QUANTITY">За кількістю</option>
+            </select>
+          </div>
+
+          <div className="w-full sm:w-64">
+            <Input
+              placeholder="Швидкий пошук за назвою..."
+              prefixIcon={<Search className="h-3.5 w-3.5" />}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
         </div>
       </div>
 
@@ -268,7 +385,12 @@ export function InventoryDashboard({
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-4 w-4 text-sky-400 shrink-0" />
           <span>
-            Партії автоматично відсортовані за <strong>FEFO</strong> (першими відображаються продукти, строк придатності яких закінчується найближчим часом).
+            {freshnessFilter !== 'ALL' && (
+              <span className="text-sky-300 font-medium mr-1.5">
+                [Фільтр свіжості: {freshnessFilter}]
+              </span>
+            )}
+            Партії відсортовані: <strong>{sortBy === 'FEFO' ? 'FEFO (термін придатності)' : sortBy === 'NAME' ? 'Назва (А-Я)' : 'Кількість'}</strong>.
           </span>
         </div>
         <span className="hidden sm:inline-block text-[11px] font-mono text-zinc-500">
@@ -288,16 +410,27 @@ export function InventoryDashboard({
             <Refrigerator className="h-10 w-10 text-zinc-600 mx-auto" />
             <div className="text-sm font-medium text-zinc-300">Немає продуктів за обраними критеріями</div>
             <p className="text-xs text-zinc-500 max-w-sm mx-auto">
-              Спробуйте змінити пошуковий запит або додайте нову партію через кнопку «Додати продукт».
+              Спробуйте змінити фільтри свіжості, пошуковий запит або додайте нову партію через кнопку «Додати продукт».
             </p>
-            <Button
-              variant="outline"
-              size="sm"
-              icon={<Plus className="h-4 w-4" />}
-              onClick={() => setIsAddModalOpen(true)}
-            >
-              Додати партію
-            </Button>
+            <div className="flex items-center justify-center gap-2 pt-2">
+              {freshnessFilter !== 'ALL' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setFreshnessFilter('ALL')}
+                >
+                  Скинути фільтр свіжості
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                icon={<Plus className="h-4 w-4" />}
+                onClick={() => setIsAddModalOpen(true)}
+              >
+                Додати партію
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : (
@@ -308,7 +441,10 @@ export function InventoryDashboard({
               item={item}
               onConsume={handleConsume}
               onDelete={handleDelete}
+              onEdit={(it) => setEditingItem(it)}
+              onSpoil={handleSpoil}
               onSimulateConflict={handleSimulateConflict}
+              showDebugActions={showDebugActions}
             />
           ))}
         </div>
@@ -319,6 +455,30 @@ export function InventoryDashboard({
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onAdd={handleAddItem}
+      />
+
+      {/* Edit Modal */}
+      <EditInventoryModal
+        isOpen={Boolean(editingItem)}
+        item={editingItem}
+        onClose={() => setEditingItem(null)}
+        onSave={(updated) => {
+          if (updated.quantity === 0) {
+            setItems((prev) => prev.filter((i) => i.id !== updated.id));
+          } else {
+            setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+          }
+        }}
+        onShowToast={onShowToast}
+        onConflict={(item, serverQuantity, currentETag, attemptedQuantity, modifiedBy) => {
+          setConflictItem({
+            item,
+            serverQuantity,
+            currentETag,
+            attemptedQuantity,
+            modifiedBy,
+          });
+        }}
       />
 
       {/* 409 Conflict Resolution Modal */}

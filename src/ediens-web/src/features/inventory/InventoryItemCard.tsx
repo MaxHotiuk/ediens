@@ -2,20 +2,26 @@ import { useState } from 'react';
 import { InventoryItem } from '../../types/api';
 import { FreshnessBadge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
-import { Minus, Trash2, GitFork, Check, Refrigerator, Archive, Snowflake } from 'lucide-react';
+import { Minus, Trash2, GitFork, Check, Refrigerator, Archive, Snowflake, Pencil, AlertOctagon } from 'lucide-react';
 
 export interface InventoryItemCardProps {
   item: InventoryItem;
   onConsume: (item: InventoryItem, delta: number) => void;
-  onDelete: (item: InventoryItem) => void;
-  onSimulateConflict: (item: InventoryItem) => void;
+  onDelete: (item: InventoryItem, reason?: string) => void;
+  onEdit?: (item: InventoryItem) => void;
+  onSpoil?: (item: InventoryItem) => void;
+  onSimulateConflict?: (item: InventoryItem) => void;
+  showDebugActions?: boolean;
 }
 
 export function InventoryItemCard({
   item,
   onConsume,
   onDelete,
+  onEdit,
+  onSpoil,
   onSimulateConflict,
+  showDebugActions = false,
 }: InventoryItemCardProps) {
   const [isConsuming, setIsConsuming] = useState(false);
   const [customDelta, setCustomDelta] = useState<number>(() => {
@@ -49,6 +55,14 @@ export function InventoryItemCard({
   const handleQuickDeduct = () => {
     onConsume(item, -customDelta);
     setIsConsuming(false);
+  };
+
+  const handleSpoilClick = () => {
+    if (onSpoil) {
+      onSpoil(item);
+    } else {
+      onDelete(item, 'SPOILED');
+    }
   };
 
   return (
@@ -125,28 +139,56 @@ export function InventoryItemCard({
         </div>
       ) : (
         <div className="flex items-center justify-between pt-2 border-t border-zinc-900 gap-1.5">
-          <Button
-            variant="outline"
-            size="sm"
-            icon={<Minus className="h-3 w-3" />}
-            className="text-xs py-1 px-2.5 h-7"
-            onClick={() => setIsConsuming(true)}
-            title="Спожити частину продукту"
-          >
-            Спожити
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              icon={<Minus className="h-3 w-3" />}
+              className="text-xs py-1 px-2 h-7"
+              onClick={() => setIsConsuming(true)}
+              title="Спожити частину продукту"
+            >
+              Спожити
+            </Button>
+
+            {onEdit && (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<Pencil className="h-3 w-3 text-zinc-400" />}
+                className="text-xs py-1 px-2 h-7 text-zinc-400 hover:text-white hover:bg-zinc-800/60"
+                onClick={() => onEdit(item)}
+                title="Редагувати партію (локація, дата, кількість)"
+              />
+            )}
+          </div>
 
           <div className="flex items-center gap-1">
+            {/* Quick action: Списати як зіпсоване */}
             <Button
               variant="ghost"
               size="sm"
-              icon={<GitFork className="h-3 w-3 text-amber-400" />}
-              className="text-xs py-1 px-2 h-7 text-amber-400 hover:text-amber-300 hover:bg-amber-950/30"
-              onClick={() => onSimulateConflict(item)}
-              title="Змоделювати 409 Conflict (ETag xmin)"
+              icon={<AlertOctagon className="h-3 w-3 text-rose-400" />}
+              className="text-xs py-1 px-2 h-7 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40"
+              onClick={handleSpoilClick}
+              title="Списати як зіпсоване (DELETE з Outbox подією)"
             >
-              409 Тест
+              Зіпсовано
             </Button>
+
+            {/* Optional debug test action */}
+            {showDebugActions && onSimulateConflict && (
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<GitFork className="h-3 w-3 text-amber-400" />}
+                className="text-xs py-1 px-2 h-7 text-amber-400 hover:text-amber-300 hover:bg-amber-950/30"
+                onClick={() => onSimulateConflict(item)}
+                title="Змоделювати 409 Conflict (ETag xmin)"
+              >
+                409
+              </Button>
+            )}
 
             <Button
               variant="ghost"

@@ -1,66 +1,116 @@
 # ==============================================================================
-# Prometheus Alerting Rules for ēdiens Platform (SRS Section 12.6)
+# Prometheus Alerting Rules for ēdiens Platform (SRS Section 12.6, AL-01..AL-10)
 # ==============================================================================
 
 groups:
   - name: ediens_sla_alerts
     rules:
-      # Alert 1: Service Availability Down
-      - alert: EdiensApiDown
-        expr: up{job="ediens-api"} == 0
-        for: 30s
-        labels:
-          severity: critical
-        annotations:
-          summary: "ēdiens Web API is DOWN"
-          description: "Instance {{ $labels.instance }} of ediens-api has been unreachable for more than 30 seconds."
-
-      # Alert 2: API Latency p95 SLA Exceeded (NFR-01)
-      - alert: HighApiLatencyP95
-        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, handler)) > 0.250
-        for: 2m
-        labels:
-          severity: warning
-        annotations:
-          summary: "API Latency p95 > 250ms on {{ $labels.handler }}"
-          description: "Endpoint {{ $labels.handler }} p95 response time is {{ $value }}s, exceeding 150ms-250ms SLA target."
-
-      # Alert 3: Critical HTTP 5xx Error Spike
+      # AL-01: Critical HTTP 5xx Error Spike
       - alert: HighHttp5xxErrorRate
-        expr: (sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))) * 100 > 1.0
+        expr: (sum(rate(http_server_requests_total{http_response_status_code=~"5.."}[5m])) / sum(rate(http_server_requests_total[5m]))) * 100 > 1.0
         for: 2m
         labels:
           severity: critical
+          alert_id: AL-01
         annotations:
           summary: "HTTP 5xx server error rate exceeded 1%"
-          description: "Server error rate is currently at {{ $value }}% across active traffic."
+          description: "Server error rate is currently at {{ $value }}% across active traffic (Threshold: > 1% warning, > 5% critical)."
 
-      # Alert 4: Spike in Optimistic Concurrency Conflicts (HTTP 409 xmin collisions)
-      - alert: HighInventoryConcurrencyConflicts
-        expr: sum(rate(inventory_concurrency_conflicts_total[5m])) > 0.5
+      # AL-02: API Latency p95 SLA Exceeded (NFR-01)
+      - alert: HighApiLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket[5m])) by (le, http_route)) > 0.250
         for: 2m
         labels:
           severity: warning
+          alert_id: AL-02
         annotations:
-          summary: "High frequency of inventory concurrency conflicts (HTTP 409)"
-          description: "Concurrent batch modification conflicts rate is {{ $value }}/sec."
+          summary: "API Latency p95 > 250ms on {{ $labels.http_route }}"
+          description: "Endpoint {{ $labels.http_route }} p95 response time is {{ $value }}s, exceeding 150ms CRUD / 800ms smart recipes SLA target."
 
-      # Alert 5: Transactional Outbox Lagging High
-      - alert: OutboxProcessingLagHigh
-        expr: outbox_messages_lag_seconds > 60
+      # AL-03: Service / Healthcheck Down
+      - alert: EdiensApiDown
+        expr: up{job="ediens-api"} == 0 or probe_success{instance="https://ediens.app/healthz/ready"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          alert_id: AL-03
+        annotations:
+          summary: "ēdiens Web API is DOWN"
+          description: "Instance {{ $labels.instance }} of ediens-api has been unreachable or failing healthcheck for more than 1 minute."
+
+      # AL-04: PostgreSQL Connection Pool Exhaustion
+      - alert: PostgresConnectionPoolExhaustion
+        expr: (npgsql_connection_pool_active_connections / 100) * 100 > 80
         for: 2m
         labels:
-          severity: warning
+          severity: critical
+          alert_id: AL-04
         annotations:
-          summary: "Transactional Outbox consumer is lagging"
-          description: "Outbox processing delay is {{ $value }} seconds. Check background worker logs."
+          summary: "PostgreSQL Connection Pool saturation > 80%"
+          description: "Npgsql connection pool utilization is at {{ $value }}% (Pool limit: 100 connections). Risk of connection exhaustion."
 
-      # Alert 6: Circuit Breaker for External API is Open
-      - alert: OpenFoodFactsCircuitBreakerOpen
-        expr: circuit_breaker_state{target_service="open_food_facts"} == 2
+      # AL-05: PostgreSQL Deadlocks or High Lock Wait
+      - alert: PostgresDeadlocksDetected
+        expr: increase(pg_stat_database_deadlocks_total[5m]) > 0
         for: 1m
         labels:
           severity: warning
+          alert_id: AL-05
         annotations:
-          summary: "Circuit Breaker for Open Food Facts is OPEN"
-          description: "External barcode API is failing or timing out. Traffic is being routed to local fallback cache."
+          summary: "PostgreSQL Deadlocks detected in ediens_db"
+          description: "{{ $value }} deadlock(s) detected during the last 5 minutes. Check application transaction lock ordering."
+
+      # AL-06: Transactional Outbox Backlog Stalled
+      - alert: OutboxProcessingLagHigh
+        expr: ediens_outbox_pending_messages_count > 100 or ediens_outbox_oldest_unprocessed_age_seconds > 120
+        for: 5m
+        labels:
+          severity: warning
+          alert_id: AL-06
+        annotations:
+          summary: "Transactional Outbox consumer is lagging"
+          description: "Outbox pending messages backlog is {{ $value }}. Event dispatching to downstream listeners is stalled."
+
+      # AL-07: Redis Memory Saturation / Eviction Risk
+      - alert: RedisMemorySaturation
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes) * 100 > 80
+        for: 3m
+        labels:
+          severity: critical
+          alert_id: AL-07
+        annotations:
+          summary: "Redis Memory Saturation > 80%"
+          description: "Redis memory utilization is at {{ $value }}% of configured 512MB maxmemory limit. Eviction risk for idempotency keys."
+
+      # AL-08: Abnormal 409 Conflict / Concurrency Storm
+      - alert: HighInventoryConcurrencyConflicts
+        expr: (rate(ediens_concurrency_conflicts_total[5m]) / (rate(http_server_requests_total{http_request_method_name=~"POST|PATCH|PUT"}[5m]) + 0.001)) * 100 > 8.0
+        for: 2m
+        labels:
+          severity: warning
+          alert_id: AL-08
+        annotations:
+          summary: "High frequency of inventory concurrency conflicts (HTTP 409)"
+          description: "Concurrent batch modification conflicts rate is {{ $value }}% of mutating traffic (xmin collisions)."
+
+      # AL-09: Rate Limiter 429 Abuse / Brute Force Spike
+      - alert: RateLimiterAbuseSpike
+        expr: sum(rate(ediens_rate_limit_rejections_total[1m])) > 20
+        for: 1m
+        labels:
+          severity: warning
+          alert_id: AL-09
+        annotations:
+          summary: "Rate Limiter 429 rejection spike detected"
+          description: "Rate limiter is rejecting {{ $value }} requests/second. Possible brute-force or denial of service attack."
+
+      # AL-10: Host Disk Space Exhaustion
+      - alert: HostDiskSpaceExhaustion
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: critical
+          alert_id: AL-10
+        annotations:
+          summary: "Host disk space available is below 15%"
+          description: "Host filesystem available disk space is currently at {{ $value }}% on root mountpoint. Risk of database read-only lockdown."

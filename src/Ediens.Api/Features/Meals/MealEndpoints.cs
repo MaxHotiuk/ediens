@@ -11,6 +11,20 @@ namespace Ediens.Api.Features.Meals;
 
 public static class MealEndpoints
 {
+    public static decimal GetPieceWeightRatio(string productName)
+    {
+        var name = (productName ?? string.Empty).ToLowerInvariant();
+        if (name.Contains("яйц") || name.Contains("egg")) return 0.55m; // ~55g per egg
+        if (name.Contains("банан") || name.Contains("banana")) return 1.20m; // ~120g per banana
+        if (name.Contains("яблук") || name.Contains("apple")) return 1.50m; // ~150g per apple
+        if (name.Contains("апельсин") || name.Contains("orange")) return 1.50m; // ~150g per orange
+        if (name.Contains("авокадо") || name.Contains("avocado")) return 1.50m; // ~150g per avocado
+        if (name.Contains("йогурт") || name.Contains("yogurt")) return 1.25m; // ~125g per cup
+        if (name.Contains("батончик") || name.Contains("bar")) return 0.50m; // ~50g per bar
+        if (name.Contains("скибк") || name.Contains("хліб") || name.Contains("bread") || name.Contains("toast")) return 0.35m; // ~35g per slice
+        return 1.0m; // fallback: 100g per piece
+    }
+
     public static IEndpointRouteBuilder MapMealEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/api/v1/meals")
@@ -78,31 +92,73 @@ public static class MealEndpoints
                         p => p.Name.ToLower() == itemInput.ProductName.ToLower(), ct);
                 }
 
-                if (product == null)
+                decimal itemCal;
+                decimal itemProt;
+                decimal itemFat;
+                decimal itemCarbs;
+
+                // Support custom macros from item-level or top-level single item request
+                decimal? customCal = itemInput.Calories ?? (request.Items.Count == 1 ? request.Calories : null);
+                decimal? customProt = itemInput.Protein ?? (request.Items.Count == 1 ? request.Protein : null);
+                decimal? customFat = itemInput.Fat ?? (request.Items.Count == 1 ? request.Fat : null);
+                decimal? customCarbs = itemInput.Carbs ?? (request.Items.Count == 1 ? request.Carbs : null);
+
+                if (customCal.HasValue && customCal.Value >= 0)
                 {
-                    product = new Product
+                    itemCal = Math.Round(customCal.Value, 1);
+                    itemProt = Math.Round(customProt ?? 0m, 1);
+                    itemFat = Math.Round(customFat ?? 0m, 1);
+                    itemCarbs = Math.Round(customCarbs ?? 0m, 1);
+
+                    if (product == null)
                     {
-                        Id = Guid.NewGuid(),
-                        Name = itemInput.ProductName.Trim(),
-                        CaloriesPer100g = 120m,
-                        ProteinPer100g = 6m,
-                        FatPer100g = 4m,
-                        CarbsPer100g = 15m,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
-                    db.Products.Add(product);
-                    await db.SaveChangesAsync(ct);
+                        decimal normRatio = itemInput.Unit.Equals("pcs", StringComparison.OrdinalIgnoreCase)
+                            ? (itemInput.Quantity > 0 ? itemInput.Quantity * GetPieceWeightRatio(itemInput.ProductName) : 1m)
+                            : (itemInput.Quantity > 0 ? itemInput.Quantity / 100.0m : 1m);
+
+                        product = new Product
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = itemInput.ProductName.Trim(),
+                            CaloriesPer100g = normRatio > 0 ? Math.Round(itemCal / normRatio, 1) : itemCal,
+                            ProteinPer100g = normRatio > 0 ? Math.Round(itemProt / normRatio, 1) : itemProt,
+                            FatPer100g = normRatio > 0 ? Math.Round(itemFat / normRatio, 1) : itemFat,
+                            CarbsPer100g = normRatio > 0 ? Math.Round(itemCarbs / normRatio, 1) : itemCarbs,
+                            CreatedAt = DateTime.UtcNow,
+                            UpdatedAt = DateTime.UtcNow
+                        };
+                        db.Products.Add(product);
+                        await db.SaveChangesAsync(ct);
+                    }
                 }
+                else
+                {
+                    if (product == null)
+                    {
+                        product = new Product
+                        {
+                            Id = Guid.NewGuid(),
+                            Name = itemInput.ProductName.Trim(),
+                            CaloriesPer100g = 120m,
+                            ProteinPer100g = 6m,
+                            FatPer100g = 4m,
+                            CarbsPer100g = 15m,
+                            CreatedAt = DateTime.UtcNow,
+                            UpdatedAt = DateTime.UtcNow
+                        };
+                        db.Products.Add(product);
+                        await db.SaveChangesAsync(ct);
+                    }
 
-                decimal ratio = itemInput.Unit.Equals("pcs", StringComparison.OrdinalIgnoreCase)
-                    ? itemInput.Quantity
-                    : itemInput.Quantity / 100.0m;
+                    decimal ratio = itemInput.Unit.Equals("pcs", StringComparison.OrdinalIgnoreCase)
+                        ? itemInput.Quantity * GetPieceWeightRatio(product.Name)
+                        : itemInput.Quantity / 100.0m;
 
-                decimal itemCal = Math.Round(product.CaloriesPer100g * ratio, 1);
-                decimal itemProt = Math.Round(product.ProteinPer100g * ratio, 1);
-                decimal itemFat = Math.Round(product.FatPer100g * ratio, 1);
-                decimal itemCarbs = Math.Round(product.CarbsPer100g * ratio, 1);
+                    itemCal = Math.Round(product.CaloriesPer100g * ratio, 1);
+                    itemProt = Math.Round(product.ProteinPer100g * ratio, 1);
+                    itemFat = Math.Round(product.FatPer100g * ratio, 1);
+                    itemCarbs = Math.Round(product.CarbsPer100g * ratio, 1);
+                }
 
                 totalCalories += itemCal;
                 totalProtein += itemProt;

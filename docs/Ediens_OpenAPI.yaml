@@ -656,8 +656,47 @@ paths:
           $ref: '#/components/responses/422InsufficientInventory'
 
   # ---------------------------------------------------------------------------
-  # 9. GET /products/barcode/{code} — Пошук товару за штрих-кодом (FR-03)
+  # 9. GET /products/search & /products/barcode/{code} — Пошук товарів (FR-03, QOL-03)
   # ---------------------------------------------------------------------------
+  /products/search:
+    get:
+      operationId: searchProducts
+      summary: Пошук продуктів у каталозі за назвою та брендом
+      description: |
+        Здійснює case-insensitive пошук продуктів за назвою та брендом у базі даних
+        для автодоповнення в формах інвентарю та логування їжі.
+      tags:
+        - Products
+      parameters:
+        - name: query
+          in: query
+          required: false
+          description: Текстовий запит для пошуку (пошук за підрядком у назві або бренді).
+          schema:
+            type: string
+            example: "вівсяні"
+        - name: limit
+          in: query
+          required: false
+          description: Максимальна кількість результатів (за замовчуванням 10, максимум 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+            example: 10
+      responses:
+        '200':
+          description: Список знайдених продуктів.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProductSearchItem'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+
   /products/barcode/{code}:
     get:
       operationId: getProductByBarcode
@@ -795,6 +834,61 @@ paths:
                   $ref: '#/components/schemas/HouseholdSummaryResponse'
         '401':
           $ref: '#/components/responses/401Unauthorized'
+
+  /households/join:
+    post:
+      operationId: joinHousehold
+      summary: Приєднатися до домогосподарства за кодом запрошення
+      description: |
+        Додає поточного автентифікованого користувача до існуючого домогосподарства
+        за валідним кодом запрошення (inviteCode). Повертає детальну інформацію про домогосподарство.
+      tags:
+        - Households
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinHouseholdRequest'
+      responses:
+        '200':
+          description: Успішно приєднано до домогосподарства.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdSummaryResponse'
+        '400':
+          $ref: '#/components/responses/400ValidationError'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '404':
+          $ref: '#/components/responses/404ItemNotFound'
+
+  /households/{id}/members:
+    get:
+      operationId: getHouseholdMembers
+      summary: Отримати список учасників домогосподарства
+      description: |
+        Повертає перелік усіх зареєстрованих учасників домогосподарства з їхніми ролями та датами приєднання.
+      tags:
+        - Households
+      parameters:
+        - $ref: '#/components/parameters/HouseholdIdPath'
+      responses:
+        '200':
+          description: Список учасників успішно отримано.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HouseholdMemberResponse'
+        '401':
+          $ref: '#/components/responses/401Unauthorized'
+        '403':
+          $ref: '#/components/responses/403HouseholdAccessDenied'
+        '404':
+          $ref: '#/components/responses/404ItemNotFound'
 
   /households/{id}/shopping-list:
     get:
@@ -1812,6 +1906,76 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    JoinHouseholdRequest:
+      type: object
+      required:
+        - inviteCode
+      properties:
+        inviteCode:
+          type: string
+          example: "EDIENS-77"
+
+    HouseholdMemberResponse:
+      type: object
+      required:
+        - userId
+        - email
+        - role
+        - joinedAt
+      properties:
+        userId:
+          type: string
+          format: uuid
+          example: 0192e2b0-0000-7000-8000-000000000001
+        email:
+          type: string
+          example: "oleg@ediens.app"
+        role:
+          type: string
+          example: "Owner"
+        joinedAt:
+          type: string
+          format: date-time
+          example: "2026-10-31T08:00:00Z"
+
+    ProductSearchItem:
+      type: object
+      required:
+        - id
+        - name
+        - caloriesPer100g
+        - proteinPer100g
+        - fatPer100g
+        - carbsPer100g
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 0192e2b1-0000-7000-8000-000000000005
+        name:
+          type: string
+          example: "Вівсяні пластівці 'Ніжні'"
+        barcode:
+          type: string
+          nullable: true
+          example: "4820000112255"
+        brand:
+          type: string
+          nullable: true
+          example: "Ніжні"
+        caloriesPer100g:
+          type: number
+          example: 350.0
+        proteinPer100g:
+          type: number
+          example: 12.0
+        fatPer100g:
+          type: number
+          example: 6.0
+        carbsPer100g:
+          type: number
+          example: 62.0
 
     # -------------------------------------------------------------------------
     # Recipe Recommendations & 1-Click Cook Schemas
