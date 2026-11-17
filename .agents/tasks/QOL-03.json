@@ -2,8 +2,8 @@
   "id": "QOL-03",
   "title": "Product Catalog Search API, Autocomplete & Custom Macro Meal Logging",
   "status": "IN_PROGRESS",
-  "assigned_to": "Maxs-MacBook-Air",
-  "updated_at": "2026-10-31T22:15:08Z",
+  "assigned_to": "voyager-ASUS",
+  "updated_at": "2026-11-17T17:45:48Z",
   "branch": "feat/QOL-03-product-search-and-custom-macros",
   "dependencies": [
     "FIX-07"
