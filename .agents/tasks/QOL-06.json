@@ -1,9 +1,9 @@
 {
   "id": "QOL-06",
   "title": "QoL E2E Smoke Test Suite, OpenAPI 3.1 Spec Refresh & System Verification",
-  "status": "IN_PROGRESS",
+  "status": "DONE",
   "assigned_to": "voyager-ASUS",
-  "updated_at": "2026-11-17T17:52:57Z",
+  "updated_at": "2026-11-17T17:56:29Z",
   "branch": "chore/QOL-06-e2e-smoke-and-spec-refresh",
   "dependencies": [
     "QOL-01",
