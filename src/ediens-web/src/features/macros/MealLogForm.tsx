@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MealType, MeasurementUnit } from '../../types/api';
 import { Button } from '../../components/ui/Button';
 import { Input, FormField, FormLabel, FormError } from '../../components/ui/Input';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
-import { Utensils, Plus, Sparkles, Key } from 'lucide-react';
-import { generateUuid } from '../../api/client';
+import { Utensils, Plus, Sparkles, Key, Search, Loader2 } from 'lucide-react';
+import { ediensApi, generateUuid } from '../../api/client';
 
 export interface MealLogFormProps {
   onLogMeal: (meal: {
@@ -28,6 +28,18 @@ const QUICK_MEALS = [
   { name: 'Запечений лосось з овочами', type: 'Dinner' as MealType, qty: 300, unit: 'g' as MeasurementUnit, cal: 480, p: 42, f: 22, c: 16 },
 ];
 
+function getPieceRatio(productName: string): number {
+  const name = productName.toLowerCase();
+  if (name.includes('яйц') || name.includes('egg')) return 0.55;
+  if (name.includes('банан') || name.includes('banana')) return 1.20;
+  if (name.includes('яблук') || name.includes('apple')) return 1.50;
+  if (name.includes('апельсин') || name.includes('orange')) return 1.50;
+  if (name.includes('авокадо') || name.includes('avocado')) return 1.50;
+  if (name.includes('йогурт') || name.includes('yogurt')) return 1.25;
+  if (name.includes('батончик') || name.includes('bar')) return 0.50;
+  return 1.0;
+}
+
 export function MealLogForm({ onLogMeal }: MealLogFormProps) {
   const [mealType, setMealType] = useState<MealType>('Breakfast');
   const [productName, setProductName] = useState('');
@@ -40,6 +52,102 @@ export function MealLogForm({ onLogMeal }: MealLogFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string>(() => generateUuid());
 
+  // Product Autocomplete State
+  const [searchResults, setSearchResults] = useState<Array<{
+    id: string;
+    name: string;
+    barcode?: string;
+    brand?: string;
+    caloriesPer100g: number;
+    proteinPer100g: number;
+    fatPer100g: number;
+    carbsPer100g: number;
+  }>>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Live search debouncing
+  useEffect(() => {
+    const query = productName.trim();
+    if (query.length < 2) {
+      setSearchResults([]);
+      setShowDropdown(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const results = await ediensApi.products.search(query, 6);
+        setSearchResults(results);
+        setShowDropdown(results.length > 0);
+      } catch (e) {
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [productName]);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelectProduct = (product: {
+    id: string;
+    name: string;
+    brand?: string;
+    caloriesPer100g: number;
+    proteinPer100g: number;
+    fatPer100g: number;
+    carbsPer100g: number;
+  }) => {
+    setProductName(product.name);
+    setShowDropdown(false);
+    setError(null);
+
+    const lowerName = product.name.toLowerCase();
+    let selectedUnit: MeasurementUnit = 'g';
+    let defaultQty = 100;
+
+    if (lowerName.includes('яйц') || lowerName.includes('банан') || lowerName.includes('яблук') || lowerName.includes('авокадо')) {
+      selectedUnit = 'pcs';
+      defaultQty = lowerName.includes('яйц') ? 2 : 1;
+    } else if (lowerName.includes('молоко') || lowerName.includes('напій') || lowerName.includes('сік')) {
+      selectedUnit = 'ml';
+      defaultQty = 250;
+    } else {
+      selectedUnit = 'g';
+      defaultQty = 150;
+    }
+
+    setUnit(selectedUnit);
+    setQuantity(String(defaultQty));
+
+    // Calculate macros based on unit and ratio
+    let ratio: number;
+    if (selectedUnit === 'pcs') {
+      ratio = defaultQty * getPieceRatio(product.name);
+    } else {
+      ratio = defaultQty / 100.0;
+    }
+
+    setCalories(String(Math.round(product.caloriesPer100g * ratio)));
+    setProtein(String(Math.round(product.proteinPer100g * ratio)));
+    setFat(String(Math.round(product.fatPer100g * ratio)));
+    setCarbs(String(Math.round(product.carbsPer100g * ratio)));
+  };
+
   const handleSelectQuick = (meal: typeof QUICK_MEALS[0]) => {
     setProductName(meal.name);
     setMealType(meal.type);
@@ -49,6 +157,7 @@ export function MealLogForm({ onLogMeal }: MealLogFormProps) {
     setProtein(String(meal.p));
     setFat(String(meal.f));
     setCarbs(String(meal.c));
+    setShowDropdown(false);
     setError(null);
   };
 
@@ -86,6 +195,7 @@ export function MealLogForm({ onLogMeal }: MealLogFormProps) {
 
     // Reset with new UUID for next entry
     setProductName('');
+    setShowDropdown(false);
     setIdempotencyKey(generateUuid());
   };
 
@@ -155,18 +265,66 @@ export function MealLogForm({ onLogMeal }: MealLogFormProps) {
 
           {/* Name & Quantity */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-2">
+            <div className="sm:col-span-2 relative" ref={dropdownRef}>
               <FormField>
                 <FormLabel htmlFor="meal-name" required>
                   Назва страви / продукту:
                 </FormLabel>
-                <Input
-                  id="meal-name"
-                  placeholder="Наприклад: Вівсянка з ягодами"
-                  value={productName}
-                  onChange={(e) => setProductName(e.target.value)}
-                />
+                <div className="relative">
+                  <Input
+                    id="meal-name"
+                    placeholder="Почніть вводити назву для автодоповнення..."
+                    value={productName}
+                    onChange={(e) => setProductName(e.target.value)}
+                    onFocus={() => {
+                      if (searchResults.length > 0) setShowDropdown(true);
+                    }}
+                    autoComplete="off"
+                  />
+                  {isSearching && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />
+                    </div>
+                  )}
+                </div>
               </FormField>
+
+              {/* Autocomplete Dropdown */}
+              {showDropdown && searchResults.length > 0 && (
+                <div className="absolute z-50 left-0 right-0 mt-1 bg-zinc-900 border border-zinc-700/80 rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto">
+                  <div className="px-3 py-1.5 text-[10px] uppercase font-semibold text-zinc-400 bg-zinc-950/70 border-b border-zinc-800 flex items-center gap-1.5">
+                    <Search className="h-3 w-3 text-emerald-400" />
+                    <span>Знайдено в каталозі:</span>
+                  </div>
+                  {searchResults.map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      onClick={() => handleSelectProduct(product)}
+                      className="w-full text-left px-3 py-2 hover:bg-zinc-800/70 border-b border-zinc-800/40 last:border-b-0 transition-colors flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-zinc-100 truncate">
+                          {product.name}
+                        </div>
+                        {product.brand && (
+                          <div className="text-[10px] text-zinc-400 truncate">
+                            {product.brand}
+                          </div>
+                        )}
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="text-xs font-mono font-semibold text-amber-400">
+                          {product.caloriesPer100g} ккал
+                        </div>
+                        <div className="text-[9px] font-mono text-zinc-400">
+                          Б:{product.proteinPer100g} Ж:{product.fatPer100g} В:{product.carbsPer100g}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div>

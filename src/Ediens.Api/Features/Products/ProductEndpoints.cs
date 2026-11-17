@@ -19,6 +19,44 @@ public static partial class ProductEndpoints
         var group = endpoints.MapGroup("/api/v1/products")
             .WithTags("Products");
 
+        group.MapGet("/search", async (
+            string? query,
+            int? limit,
+            HttpContext context,
+            EdiensDbContext db,
+            CancellationToken ct) =>
+        {
+            var cleanQuery = (query ?? string.Empty).Trim().ToLower();
+            if (string.IsNullOrWhiteSpace(cleanQuery))
+            {
+                return Results.Ok(new List<ProductSearchItemDto>());
+            }
+
+            var takeLimit = Math.Clamp(limit ?? 10, 1, 50);
+
+            var products = await db.Products
+                .AsNoTracking()
+                .Where(p => p.Name.ToLower().Contains(cleanQuery) ||
+                            (p.Brand != null && p.Brand.ToLower().Contains(cleanQuery)))
+                .OrderBy(p => p.Name)
+                .Take(takeLimit)
+                .Select(p => new ProductSearchItemDto(
+                    p.Id,
+                    p.Name,
+                    p.Barcode,
+                    p.Brand,
+                    p.CaloriesPer100g,
+                    p.ProteinPer100g,
+                    p.FatPer100g,
+                    p.CarbsPer100g
+                ))
+                .ToListAsync(ct);
+
+            return Results.Ok(products);
+        })
+        .WithName("SearchProducts")
+        .WithSummary("Повнотекстовий або підрядковий пошук продуктів за назвою та брендом");
+
         group.MapGet("/barcode/{code}", async (
             string code,
             HttpContext context,

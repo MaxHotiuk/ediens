@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input, FormField, FormLabel, FormError } from '../../components/ui/Input';
 import { StorageLocation, MeasurementUnit, CreateInventoryItemRequest } from '../../types/api';
 import { ediensApi, DEFAULT_HOUSEHOLD_ID, EdiensApiError } from '../../api/client';
-import { Plus, Refrigerator, Archive, Snowflake, Sparkles, ScanBarcode, Search, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Plus, Refrigerator, Archive, Snowflake, Sparkles, ScanBarcode, Search, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 export interface AddInventoryModalProps {
   isOpen: boolean;
@@ -34,6 +34,103 @@ export function AddInventoryModal({ isOpen, onClose, onAdd }: AddInventoryModalP
   const [errorName, setErrorName] = useState<string | null>(null);
   const [errorQuantity, setErrorQuantity] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Autocomplete state
+  const [searchResults, setSearchResults] = useState<Array<{
+    id: string;
+    name: string;
+    barcode?: string;
+    brand?: string;
+    caloriesPer100g: number;
+    proteinPer100g: number;
+    fatPer100g: number;
+    carbsPer100g: number;
+  }>>([]);
+  const [isSearchingProduct, setIsSearchingProduct] = useState(false);
+  const [showProductDropdown, setShowProductDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Debounced product catalog search
+  useEffect(() => {
+    const query = productName.trim();
+    if (query.length < 2) {
+      setSearchResults([]);
+      setShowProductDropdown(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSearchingProduct(true);
+      try {
+        const results = await ediensApi.products.search(query, 6);
+        setSearchResults(results);
+        setShowProductDropdown(results.length > 0);
+      } catch (e) {
+        setSearchResults([]);
+      } finally {
+        setIsSearchingProduct(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [productName]);
+
+  // Click outside listener for dropdown
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowProductDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelectProduct = (product: {
+    id: string;
+    name: string;
+    barcode?: string;
+    brand?: string;
+    caloriesPer100g: number;
+    proteinPer100g: number;
+    fatPer100g: number;
+    carbsPer100g: number;
+  }) => {
+    setProductName(product.name);
+    setProductId(product.id);
+    if (product.barcode) setBarcode(product.barcode);
+    setShowProductDropdown(false);
+    setErrorName(null);
+
+    // Auto-select location & unit based on product characteristics
+    const lowerName = product.name.toLowerCase();
+    if (lowerName.includes('молоко') || lowerName.includes('напій') || lowerName.includes('сік')) {
+      setUnit('ml');
+      setLocation('Fridge');
+      setExpiryDays(4);
+    } else if (lowerName.includes('крупа') || lowerName.includes('пластівці') || lowerName.includes('вівсян') || lowerName.includes('борошно')) {
+      setUnit('g');
+      setLocation('Pantry');
+      setExpiryDays(90);
+    } else if (lowerName.includes('філе') || lowerName.includes('м\'ясо') || lowerName.includes('риба')) {
+      setUnit('g');
+      setLocation('Fridge');
+      setExpiryDays(2);
+    } else if (lowerName.includes('яйця') || lowerName.includes('яйц')) {
+      setUnit('pcs');
+      setLocation('Fridge');
+      setExpiryDays(14);
+    } else {
+      setUnit('g');
+      setLocation('Fridge');
+      setExpiryDays(5);
+    }
+
+    setBarcodeMessage({
+      text: `✓ Знайдено в каталозі: «${product.name}» (${product.brand || 'Локальна база'}) • ${product.caloriesPer100g} ккал/100г`,
+      isError: false,
+    });
+  };
 
   const handleBarcodeLookup = async (codeToLookup?: string) => {
     const code = (codeToLookup || barcode).trim();
@@ -130,6 +227,7 @@ export function AddInventoryModal({ isOpen, onClose, onAdd }: AddInventoryModalP
       setProductName('');
       setQuantity('500');
       setExpiryDays(3);
+      setShowProductDropdown(false);
       onClose();
     } catch (err: unknown) {
       const msg = err instanceof EdiensApiError ? (err.problem?.detail || err.message) : 'Помилка додавання партії';
@@ -158,32 +256,27 @@ export function AddInventoryModal({ isOpen, onClose, onAdd }: AddInventoryModalP
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-zinc-300 flex items-center gap-1.5">
               <ScanBarcode className="h-4 w-4 text-sky-400" />
-              <span>Сканування штрих-коду EAN-13:</span>
+              <span>Пошук за штрих-кодом EAN-13:</span>
             </span>
-            <span className="text-[10px] font-mono text-zinc-500">OpenFoodFacts & Local DB</span>
+            <span className="text-[10px] font-mono text-zinc-500">Автозаповнення назви та КБЖВ</span>
           </div>
 
           <div className="flex gap-2">
             <Input
-              id="barcode-input"
-              placeholder="Введіть 8–13 цифр (наприклад, 4820000112233)..."
+              placeholder="Введіть 8 або 13 цифр (наприклад 4820000112233)"
               value={barcode}
-              onChange={(e) => {
-                setBarcode(e.target.value);
-                if (barcodeMessage) setBarcodeMessage(null);
-              }}
+              onChange={(e) => setBarcode(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
                   handleBarcodeLookup();
                 }
               }}
-              prefixIcon={<ScanBarcode className="h-4 w-4 text-zinc-500" />}
-              className="text-xs font-mono"
+              className="font-mono text-xs"
             />
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               icon={<Search className="h-3.5 w-3.5" />}
               onClick={() => handleBarcodeLookup()}
@@ -232,23 +325,73 @@ export function AddInventoryModal({ isOpen, onClose, onAdd }: AddInventoryModalP
           )}
         </div>
 
-        {/* Product Name */}
-        <FormField>
-          <FormLabel htmlFor="product-name" required>
-            Назва продукту:
-          </FormLabel>
-          <Input
-            id="product-name"
-            placeholder="Наприклад: Куряче філе або Молоко 2.5%"
-            value={productName}
-            onChange={(e) => {
-              setProductName(e.target.value);
-              if (errorName) setErrorName(null);
-            }}
-            error={Boolean(errorName)}
-          />
-          <FormError message={errorName} />
-        </FormField>
+        {/* Product Name with Live Search Dropdown */}
+        <div className="relative" ref={dropdownRef}>
+          <FormField>
+            <FormLabel htmlFor="product-name" required>
+              Назва продукту:
+            </FormLabel>
+            <div className="relative">
+              <Input
+                id="product-name"
+                placeholder="Наприклад: Куряче філе або Молоко 2.5%"
+                value={productName}
+                onChange={(e) => {
+                  setProductName(e.target.value);
+                  if (errorName) setErrorName(null);
+                }}
+                onFocus={() => {
+                  if (searchResults.length > 0) setShowProductDropdown(true);
+                }}
+                autoComplete="off"
+                error={Boolean(errorName)}
+              />
+              {isSearchingProduct && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />
+                </div>
+              )}
+            </div>
+            <FormError message={errorName} />
+          </FormField>
+
+          {/* Live Search Autocomplete Dropdown */}
+          {showProductDropdown && searchResults.length > 0 && (
+            <div className="absolute z-50 left-0 right-0 mt-1 bg-zinc-900 border border-zinc-700/80 rounded-lg shadow-xl overflow-hidden max-h-60 overflow-y-auto">
+              <div className="px-3 py-1.5 text-[10px] uppercase font-semibold text-zinc-400 bg-zinc-950/70 border-b border-zinc-800 flex items-center gap-1.5">
+                <Search className="h-3 w-3 text-emerald-400" />
+                <span>Знайдено в каталозі:</span>
+              </div>
+              {searchResults.map((product) => (
+                <button
+                  key={product.id}
+                  type="button"
+                  onClick={() => handleSelectProduct(product)}
+                  className="w-full text-left px-3 py-2 hover:bg-zinc-800/70 border-b border-zinc-800/40 last:border-b-0 transition-colors flex items-center justify-between gap-2"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-zinc-100 truncate">
+                      {product.name}
+                    </div>
+                    {product.brand && (
+                      <div className="text-[10px] text-zinc-400 truncate">
+                        {product.brand}
+                      </div>
+                    )}
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="text-xs font-mono font-semibold text-amber-400">
+                      {product.caloriesPer100g} ккал
+                    </div>
+                    <div className="text-[9px] font-mono text-zinc-400">
+                      Б:{product.proteinPer100g} Ж:{product.fatPer100g} В:{product.carbsPer100g}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Storage Location Selector */}
         <FormField>

@@ -92,8 +92,16 @@ export function MacroTrackerView({ onShowToast }: MacroTrackerViewProps) {
               productName: mealData.productName,
               quantity: mealData.quantity,
               unit: mealData.unit,
+              calories: mealData.calories,
+              protein: mealData.protein,
+              fat: mealData.fat,
+              carbs: mealData.carbs,
             },
           ],
+          calories: mealData.calories,
+          protein: mealData.protein,
+          fat: mealData.fat,
+          carbs: mealData.carbs,
         },
         mealData.idempotencyKey
       );
