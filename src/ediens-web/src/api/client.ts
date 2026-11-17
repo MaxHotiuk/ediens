@@ -351,7 +351,15 @@ export const ediensApi = {
               productName: string;
               quantity: number;
               unit: string;
+              calories?: number;
+              protein?: number;
+              fat?: number;
+              carbs?: number;
             }>;
+            calories?: number;
+            protein?: number;
+            fat?: number;
+            carbs?: number;
           }
         | Omit<MealLog, 'id' | 'loggedAt'>,
       idempotencyKey?: string
@@ -444,6 +452,27 @@ export const ediensApi = {
    * Products & Barcode Lookup
    */
   products: {
+    async search(query: string, limit = 10): Promise<Array<{
+      id: string;
+      name: string;
+      barcode?: string;
+      brand?: string;
+      caloriesPer100g: number;
+      proteinPer100g: number;
+      fatPer100g: number;
+      carbsPer100g: number;
+    }>> {
+      if (!query || !query.trim()) return [];
+      const res = await axiosInstance.get('/products/search', {
+        params: { query: query.trim(), limit },
+      });
+      if (Array.isArray(res.data)) return res.data;
+      if (res.data && typeof res.data === 'object' && Array.isArray((res.data as any).products)) {
+        return (res.data as any).products;
+      }
+      return [];
+    },
+
     async getByBarcode(barcode: string): Promise<{
       id: string;
       name: string;

@@ -6,13 +6,21 @@ public record MealLogItemInput(
     [property: JsonPropertyName("productId")] Guid? ProductId,
     [property: JsonPropertyName("productName")] string ProductName,
     [property: JsonPropertyName("quantity")] decimal Quantity,
-    [property: JsonPropertyName("unit")] string Unit
+    [property: JsonPropertyName("unit")] string Unit,
+    [property: JsonPropertyName("calories")] decimal? Calories = null,
+    [property: JsonPropertyName("protein")] decimal? Protein = null,
+    [property: JsonPropertyName("fat")] decimal? Fat = null,
+    [property: JsonPropertyName("carbs")] decimal? Carbs = null
 );
 
 public record CreateMealLogRequest(
     [property: JsonPropertyName("mealType")] string MealType,
     [property: JsonPropertyName("loggedAt")] DateTime LoggedAt,
-    [property: JsonPropertyName("items")] List<MealLogItemInput> Items
+    [property: JsonPropertyName("items")] List<MealLogItemInput> Items,
+    [property: JsonPropertyName("calories")] decimal? Calories = null,
+    [property: JsonPropertyName("protein")] decimal? Protein = null,
+    [property: JsonPropertyName("fat")] decimal? Fat = null,
+    [property: JsonPropertyName("carbs")] decimal? Carbs = null
 );
 
 public record MacroBudgetValues(

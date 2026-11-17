@@ -13,3 +13,14 @@ public record ProductBarcodeDetailsResponse(
     [property: JsonPropertyName("dataSource")] string DataSource,
     [property: JsonPropertyName("isCached")] bool IsCached
 );
+
+public record ProductSearchItemDto(
+    [property: JsonPropertyName("id")] Guid Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("barcode")] string? Barcode,
+    [property: JsonPropertyName("brand")] string? Brand,
+    [property: JsonPropertyName("caloriesPer100g")] decimal CaloriesPer100g,
+    [property: JsonPropertyName("proteinPer100g")] decimal ProteinPer100g,
+    [property: JsonPropertyName("fatPer100g")] decimal FatPer100g,
+    [property: JsonPropertyName("carbsPer100g")] decimal CarbsPer100g
+);
